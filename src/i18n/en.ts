@@ -60,6 +60,7 @@ const dict: Record<string, string> = {
   'st.forge': 'At the forge', 'st.fun': 'Relaxing', 'st.rest': 'Recovering', 'st.sleep': 'Sleeping', 'st.deposit': 'Delivering goods',
   'st.quest': 'Taking a request', 'st.expedition': 'Signing up for an expedition', 'st.expWait': 'Waiting to depart',
   'st.exitExp': 'Setting out', 'st.patrol': 'Wandering', 'st.camp': 'Camping', 'st.gatherNode': 'Heading out to gather',
+  'st.homeStay': 'At home',
   'st.rescue': 'Going to a rescue', 'st.dropoff': 'Carrying someone', 'st.visit': 'Sightseeing', 'st.leave': 'Heading home',
 
   'role.fighter': 'Adventurer', 'role.gatherer': 'Gatherer', 'role.civilian': 'Villager', 'role.tourist': 'Visitor',

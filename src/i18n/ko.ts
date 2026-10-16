@@ -64,6 +64,7 @@ const dict: Record<string, string> = {
   'st.forge': '대장간에 있음', 'st.fun': '휴식 중', 'st.rest': '요양 중', 'st.sleep': '수면 중', 'st.deposit': '납품 중',
   'st.quest': '의뢰를 받으러 가는 중', 'st.expedition': '원정 신청 중', 'st.expWait': '출발 대기',
   'st.exitExp': '출발', 'st.patrol': '산책 중', 'st.camp': '야영 중', 'st.gatherNode': '채집하러 가는 중',
+  'st.homeStay': '집에서 쉬는 중',
   'st.rescue': '구조하러 가는 중', 'st.dropoff': '부상자 운반 중', 'st.visit': '관광 중', 'st.leave': '귀가 중',
 
   'role.fighter': '모험가', 'role.gatherer': '채집가', 'role.civilian': '마을 사람', 'role.tourist': '관광객',

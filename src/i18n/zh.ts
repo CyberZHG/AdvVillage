@@ -60,6 +60,7 @@ const dict: Record<string, string> = {
   'st.forge': '在锻造屋', 'st.fun': '休闲中', 'st.rest': '疗养中', 'st.sleep': '睡觉', 'st.deposit': '交付物资',
   'st.quest': '接取委托', 'st.expedition': '报名远征', 'st.expWait': '等待出发',
   'st.exitExp': '出发远征', 'st.patrol': '闲逛', 'st.camp': '野营', 'st.gatherNode': '前往采集',
+  'st.homeStay': '在家休息',
   'st.rescue': '前去救援', 'st.dropoff': '运送伤员', 'st.visit': '观光中', 'st.leave': '踏上归途',
 
   'role.fighter': '冒险者', 'role.gatherer': '采集者', 'role.civilian': '平民', 'role.tourist': '游客',

@@ -64,6 +64,7 @@ const dict: Record<string, string> = {
   'st.forge': '鍛冶屋にいる', 'st.fun': 'くつろぎ中', 'st.rest': '療養中', 'st.sleep': '睡眠中', 'st.deposit': '納品中',
   'st.quest': '依頼を受けに行く', 'st.expedition': '遠征に申し込む', 'st.expWait': '出発待ち',
   'st.exitExp': '出発', 'st.patrol': 'ぶらぶら', 'st.camp': '野営中', 'st.gatherNode': '採集に向かう',
+  'st.homeStay': '家でくつろぎ中',
   'st.rescue': '救助に向かう', 'st.dropoff': 'けが人を運搬中', 'st.visit': '観光中', 'st.leave': '帰路',
 
   'role.fighter': '冒険者', 'role.gatherer': '採集者', 'role.civilian': '村人', 'role.tourist': '観光客',
