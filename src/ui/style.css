@@ -14,7 +14,8 @@
 }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; height: 100%; overflow: hidden; background: #1b2333; color: var(--text); font-family: var(--font); font-size: 14px; }
+* { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; background: #1b2333; color: var(--text); font-family: var(--font); font-size: 14px; }
 canvas#game { position: fixed; inset: 0; width: 100vw; height: 100vh; image-rendering: pixelated; touch-action: none; cursor: pointer; }
 .hidden { display: none !important; }
 img.ic { width: 18px; height: 18px; image-rendering: pixelated; vertical-align: -4px; margin-right: 2px; }

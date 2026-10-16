@@ -18,8 +18,11 @@ import {
   type Ctl, type Tab,
 } from './ui/ui';
 import type { GameState } from './game/types';
+import { blockZoom, registerSW } from './pwa';
 
 const $ = (id: string) => document.getElementById(id)!;
+blockZoom();
+registerSW();
 const meta = loadMeta();
 setLang(detectLang(meta.lang));
 
