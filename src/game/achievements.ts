@@ -1,0 +1,76 @@
+import { CLASS_KEYS, EXPEDITIONS, MONSTERS, VILLAGES } from './data';
+import { EXPANSIONS } from './constants';
+import { residents } from './state';
+import { COMBOS } from './combos';
+import { festival } from './events';
+import type { GameState } from './types';
+import type { Meta } from './save';
+
+type Check = (s: GameState, m: Meta) => boolean;
+
+const maxFighter = (s: GameState) => Math.max(0, ...s.npcs.filter((n) => n.role === 'fighter').map((n) => n.level));
+const maxBld = (s: GameState) => Math.max(0, ...s.buildings.map((b) => b.level));
+const maxForge = (s: GameState) => Math.max(0, ...Object.values(s.wlv));
+const has = (s: GameState, type: string) => s.buildings.some((b) => b.type === type);
+
+export const ACHIEVEMENTS: [string, Check][] = [
+  ['firstBuild', (s) => s.buildings.length >= 3],
+  ['town30', (s) => s.buildings.length >= 30],
+  ['city80', (s) => s.buildings.length >= 80],
+  ['pop20', (s) => residents(s).length >= 20],
+  ['pop60', (s) => residents(s).length >= 60],
+  ['pop150', (s) => residents(s).length >= 150],
+  ['lv10', (s) => maxFighter(s) >= 10],
+  ['lv50', (s) => maxFighter(s) >= 50],
+  ['lv100', (s) => maxFighter(s) >= 100],
+  ['lv200', (s) => maxFighter(s) >= 200],
+  ['kill100', (s) => s.stats.kills >= 100],
+  ['kill1000', (s) => s.stats.kills >= 1000],
+  ['kill10000', (s) => s.stats.kills >= 10000],
+  ['rich10k', (s) => s.money >= 10000],
+  ['rich100k', (s) => s.money >= 100000],
+  ['rich1m', (s) => s.money >= 1000000],
+  ['quest1', (s) => s.stats.quests >= 1],
+  ['quest30', (s) => s.stats.quests >= 30],
+  ['rescue10', (s) => s.stats.rescues >= 10],
+  ['exp1', (s) => s.stats.expeditions >= 1],
+  ['expAll', (s) => EXPEDITIONS.every((e) => s.stats.expLocs.includes(e.key))],
+  ['dex10', (s) => s.seen.length >= 10],
+  ['dex50', (s) => s.seen.length >= 50],
+  ['dex100', (s) => s.seen.length >= Object.keys(MONSTERS).length],
+  ['regular', (s) => s.profiles.some((p) => p.level >= 10)],
+  ['tourist1000', (s) => s.stats.tourists >= 1000],
+  ['bld50', (s) => maxBld(s) >= 50],
+  ['bld200', (s) => maxBld(s) >= 200],
+  ['forge10', (s) => maxForge(s) >= 10],
+  ['forge50', (s) => maxForge(s) >= 50],
+  ['expandMax', (s) => s.vlv >= EXPANSIONS.length],
+  ['allClasses', (s) => CLASS_KEYS.every((c) => s.npcs.some((n) => n.role === 'fighter' && n.cls === c))],
+  ['leisure', (s) => has(s, 'spa') && has(s, 'theater') && has(s, 'arena')],
+  ['year16', (s) => s.scored],
+  ['rankA', (s) => !!s.score && (s.score.rank === 'A' || s.score.rank === 'S')],
+  ['rankS', (s) => s.score?.rank === 'S'],
+  ['allVillages', (_s, m) => m.unlocked >= VILLAGES.length - 1],
+  ['bossSlayer', (s) => s.npcs.some((n) => (n.bosses ?? 0) > 0)],
+  ['bossHunter5', (s) => s.npcs.reduce((a, n) => a + (n.bosses ?? 0), 0) >= 15],
+  ['shiny', (s) => s.shinySeen.length >= 1],
+  ['shiny10', (s) => s.shinySeen.length >= 10],
+  ['partners', (s) => s.npcs.some((n) => n.partner != null)],
+  ['wedding', (s) => s.couples.length >= 1],
+  ['family', (s) => s.couples.some((c) => c.kids > 0)],
+  ['titled', (s) => s.npcs.some((n) => (n.titles?.length ?? 0) >= 3)],
+  ['combo1', (s) => s.comboSeen.length >= 1],
+  ['comboAll', (s) => COMBOS.every((c) => s.comboSeen.includes(c.key))],
+  ['festival', (s) => festival(s) !== null],
+  ['newspaper', (s) => s.reports.length >= 1],
+];
+
+export function checkAchievements(s: GameState, m: Meta): string[] {
+  const fresh: string[] = [];
+  for (const [id, check] of ACHIEVEMENTS) {
+    if (m.ach[id] || !check(s, m)) continue;
+    m.ach[id] = Date.now();
+    fresh.push(id);
+  }
+  return fresh;
+}

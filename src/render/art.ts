@@ -1,13 +1,13 @@
 import type { Ground, NodeKind } from '../game/data';
 import type { Cls, Look, Role } from '../game/types';
 import { makeCanvas } from './pixel';
+import { PAX, PAY, PH, PW, compose, layerNames, lookColors, type Layer } from './compose';
 
-export interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number; fx?: number[][] }
+export interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number; fx?: number[][]; tint?: string }
 export interface Sprite extends Frame { img: CanvasImageSource }
 
 export type TileKind = 'wild0' | 'wild1' | 'wild2' | 'village' | 'road' | 'street';
 export const TILE_H = 22;
-export const LOOK_COUNTS = { skin: 3, hair: 6, cloth: 4 };
 
 let sheet: HTMLImageElement;
 let flippedSheet: HTMLCanvasElement;
@@ -27,6 +27,10 @@ export async function loadArt(base = './assets/') {
   sheet = img;
   frames = json.frames;
   sheetW = json.w;
+  const raw = makeCanvas(img.width, img.height);
+  const rctx = raw.getContext('2d', { willReadFrequently: true })!;
+  rctx.drawImage(img, 0, 0);
+  sheetPixels = rctx.getImageData(0, 0, img.width, img.height).data;
   flippedSheet = makeCanvas(img.width, img.height);
   const ctx = flippedSheet.getContext('2d')!;
   ctx.scale(-1, 1);
@@ -51,14 +55,57 @@ export const buildingSprite = (type: string, flip = false) => get(`bld/${type}`,
 export const nodeSprite = (kind: NodeKind, v: number, g: Ground) => get(`node/${kind}/${v % (kind === 'tree' ? 4 : 2)}/${g}`);
 export const monsterSprite = (type: string, frame: number, flip: boolean) => get(`m/${type}/${frame}`, flip);
 
-const roleKey = (role: Role, cls: Cls) => (role === 'fighter' ? cls : role);
-const lookKey = (l: Look) => `${l.skin % LOOK_COUNTS.skin}${l.hair % LOOK_COUNTS.hair}${l.cloth % LOOK_COUNTS.cloth}`;
-export const humanSprite = (role: Role, cls: Cls, look: Look, frame: number, flip: boolean) =>
-  get(`h/${roleKey(role, cls)}/${lookKey(look)}/${frame}`, flip);
+let sheetPixels: Uint8ClampedArray | null = null;
+const layerCache = new Map<string, Layer | null>();
+
+function layer(name: string): Layer | null {
+  if (layerCache.has(name)) return layerCache.get(name)!;
+  const f = frames[name];
+  let l: Layer | null = null;
+  if (f && sheetPixels) {
+    const data = new Uint8ClampedArray(PW * PH * 4);
+    for (let y = 0; y < PH; y++) {
+      const src = ((f.y + y) * sheetW + f.x) * 4;
+      data.set(sheetPixels.subarray(src, src + PW * 4), y * PW * 4);
+    }
+    l = { data, tint: (f.tint as Layer['tint']) ?? '' };
+  }
+  layerCache.set(name, l);
+  return l;
+}
+
+const humanCache = new Map<string, Sprite>();
+const lookKey = (l: Look, frame: number) =>
+  `${l.skin},${l.hair},${l.style},${l.cloth},${l.cloth2},${l.pants},${l.outfit},${l.head},${l.beard},${l.item},${frame}`;
+
+function humanCanvas(look: Look, frame: number): HTMLCanvasElement {
+  const layers = layerNames(look, frame).map(layer).filter((l): l is Layer => !!l);
+  const c = makeCanvas(PW, PH);
+  c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(compose(layers, lookColors(look))), PW, PH), 0, 0);
+  return c;
+}
+
+export function humanSprite(_role: Role, _cls: Cls, look: Look, frame: number, flip: boolean): Sprite {
+  const key = lookKey(look, frame) + (flip ? 'f' : '');
+  let sp = humanCache.get(key);
+  if (!sp) {
+    let img = humanCanvas(look, frame);
+    if (flip) {
+      const f = makeCanvas(PW, PH);
+      const ctx = f.getContext('2d')!;
+      ctx.scale(-1, 1);
+      ctx.drawImage(img, -PW, 0);
+      img = f;
+    }
+    sp = { img, x: 0, y: 0, w: PW, h: PH, ax: flip ? PW - 1 - PAX : PAX, ay: PAY };
+    humanCache.set(key, sp);
+  }
+  return sp;
+}
 
 const rotCache = new Map<string, Sprite>();
 export function lyingSprite(role: Role, cls: Cls, look: Look): Sprite {
-  const key = roleKey(role, cls) + lookKey(look);
+  const key = lookKey(look, 0);
   let s = rotCache.get(key);
   if (!s) {
     const src = humanSprite(role, cls, look, 0, false);
@@ -66,8 +113,8 @@ export function lyingSprite(role: Role, cls: Cls, look: Look): Sprite {
     const ctx = c.getContext('2d')!;
     ctx.translate(src.h, 0);
     ctx.rotate(Math.PI / 2);
-    ctx.drawImage(src.img, src.x, src.y, src.w, src.h, 0, 0, src.w, src.h);
-    s = { img: c, x: 0, y: 0, w: src.h, h: src.w, ax: Math.floor(src.h / 2), ay: src.w - 4 };
+    ctx.drawImage(src.img, 0, 0);
+    s = { img: c, x: 0, y: 0, w: src.h, h: src.w, ax: Math.floor(src.h / 2), ay: src.w - 6 };
     rotCache.set(key, s);
   }
   return s;
@@ -89,4 +136,10 @@ function iconOf(name: string, flip = false): string {
 export const itemIcon = (item: string) => iconOf(`i/${item}`);
 export const monsterIcon = (type: string) => iconOf(`m/${type}/0`);
 export const buildingIcon = (type: string) => iconOf(`bld/${type}`);
-export const humanIcon = (role: Role, cls: Cls, look: Look) => iconOf(`h/${roleKey(role, cls)}/${lookKey(look)}/0`);
+const humanIcons = new Map<string, string>();
+export function humanIcon(role: Role, cls: Cls, look: Look): string {
+  const key = lookKey(look, 0);
+  let url = humanIcons.get(key);
+  if (!url) { url = (humanSprite(role, cls, look, 0, false).img as HTMLCanvasElement).toDataURL(); humanIcons.set(key, url); }
+  return url;
+}

@@ -1,36 +1,35 @@
 import en from './en';
 import zh from './zh';
+import ja from './ja';
+import ko from './ko';
 
 export interface LangPack {
   label: string;
   dict: Record<string, string>;
-  names: string[];
+  name: (i: number) => string;
   num?: (n: number) => string;
 }
 
 // add a language by creating a pack file and registering it here
-export const LANGS: Record<string, LangPack> = { en, zh };
+export const LANGS: Record<string, LangPack> = { en, zh, ja, ko };
 
 let current = 'en';
 
 export const getLang = () => current;
 export function setLang(l: string) {
   if (LANGS[l]) current = l;
-  document.documentElement.lang = l;
+  document.documentElement.lang = current === 'zh' ? 'zh-CN' : current;
+  document.title = t('game.title');
 }
 
 export function detectLang(saved?: string): string {
   if (saved && LANGS[saved]) return saved;
   const nav = (navigator.language || 'en').toLowerCase();
-  return nav.startsWith('zh') ? 'zh' : 'en';
+  for (const l of Object.keys(LANGS)) if (nav.startsWith(l)) return l;
+  return 'en';
 }
 
-export function npcName(i: number): string {
-  const names = LANGS[current].names;
-  const base = names[i % names.length];
-  const gen = Math.floor(i / names.length);
-  return gen ? `${base} ${['', 'II', 'III', 'IV', 'V'][gen] ?? gen + 1}` : base;
-}
+export const npcName = (i: number) => LANGS[current].name(i);
 
 export function fmt(n: number): string {
   const pack = LANGS[current];

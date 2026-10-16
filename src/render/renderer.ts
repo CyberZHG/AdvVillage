@@ -1,8 +1,9 @@
 import { MAP } from '../game/constants';
 import { BUILDINGS, villageDef } from '../game/data';
 import { maxHp, monsterStats, tod } from '../game/state';
-import { blocked, doorAt, inVillage, isRoad, placeRot, roadState, zoneOf } from '../game/world';
+import { blocked, inVillage, isRoad, placement, roadState, zoneOf } from '../game/world';
 import { t } from '../i18n';
+import { drawAtmosphere, drawEmote, nightAlpha } from './atmosphere';
 import type { GameState, Npc } from '../game/types';
 import { makeCanvas } from './pixel';
 import {
@@ -14,6 +15,10 @@ interface Floater { x: number; y: number; text: string; color: string; t: number
 interface Drawable { depth: number; draw: () => void; hit?: { x: number; y: number; w: number; h: number; sel: Sel } }
 
 const GX = MAP * 16;
+export const CLASS_COLOR: Record<string, string> = {
+  warrior: '#ff5a4a', knight: '#a8c8ff', archer: '#6ae05a', rogue: '#c07aff',
+  mage: '#4aa8ff', cleric: '#fff2a0', lancer: '#ffa040', monk: '#ffd84a',
+};
 
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
@@ -31,6 +36,8 @@ export class Renderer {
   ghost: string | null = null;
   ghostRot = 0;
   labels = false;
+  focusFighters = false;
+  get view() { return this.low; }
   selected: Sel = null;
   dpr = 1;
 
@@ -108,7 +115,12 @@ export class Renderer {
     this.ground = c;
   }
 
+  private emotes = new Map<number, { k: string; t: number }>();
+  private lastTime = 0;
+
   render(s: GameState, time: number) {
+    this.lastTime = time;
+    if (this.emotes.size > 400) this.emotes.clear();
     this.buildGround(s);
     const z = this.cam.zoom;
     const lw = Math.ceil(this.canvas.width / z), lh = Math.ceil(this.canvas.height / z);
@@ -155,17 +167,26 @@ export class Renderer {
       const px = sx(m.x, m.y), py = sy(m.x, m.y);
       if (!visible(px, py)) continue;
       const frame = Math.floor(time * 3 + m.id) % 2;
-      const sp = monsterSprite(m.type, frame, m.facing < 0);
+      const base = monsterSprite(m.type, frame, m.facing < 0);
+      const sp = m.shiny ? shinySprite(base, `${m.type}:${frame}:${m.facing}`) : base;
+      const k = m.boss != null ? 2 : 1;
       const sel = this.selected?.kind === 'mon' && this.selected.id === m.id;
+      const top = py - sp.ay * k;
       list.push({
         depth: m.x + m.y,
         draw: () => {
-          this.shadow(px, py);
-          blit(sp, px, py);
-          if (m.target != null || sel) this.hpBar(px, py - sp.ay - 3, m.hp / Math.max(1, monsterMaxHp(s, m.type)), '#e04a3a');
-          if (sel) this.marker(px, py - sp.ay - 6);
+          if (k > 1) this.ring(px, py, '#ff4a3a');
+          else this.shadow(px, py);
+          ctx.drawImage(sp.img, sp.x, sp.y, sp.w, sp.h, px - sp.ax * k, top, sp.w * k, sp.h * k);
+          if (m.shiny) this.sparkle(px, top, sp.w * k, time + m.id);
+          const maxHp = Math.max(1, monsterStats(s, m.type, m).maxHp);
+          if (k > 1) {
+            this.hpBar(px, top - 4, m.hp / maxHp, '#e04a3a', 30);
+            this.labelQueue.push({ x: px, y: top - 6, text: `${t('boss.' + m.boss)}${t('m.' + m.type)} Lv.${m.lv}`, color: '#ff8a7a' });
+          } else if (m.target != null || sel) this.hpBar(px, top - 3, m.hp / maxHp, '#e04a3a');
+          if (sel) this.marker(px, top - 6);
         },
-        hit: { x: px - sp.ax, y: py - sp.ay, w: sp.w, h: sp.h, sel: { kind: 'mon', id: m.id } },
+        hit: { x: px - sp.ax * k, y: top, w: sp.w * k, h: sp.h * k, sel: { kind: 'mon', id: m.id } },
       });
     }
     for (const n of s.npcs) {
@@ -182,6 +203,7 @@ export class Renderer {
     }
     if (this.hoverTile && this.ghost) this.drawGhost(s, sx, sy);
 
+    drawAtmosphere(ctx, s, lw, lh, time, tod(s), sx, sy);
     const night = nightAlpha(tod(s));
     if (night > 0) {
       ctx.fillStyle = `rgba(12,18,52,${night})`;
@@ -194,7 +216,7 @@ export class Renderer {
     this.drawLabels();
   }
 
-  private labelQueue: { x: number; y: number; text: string }[] = [];
+  private labelQueue: { x: number; y: number; text: string; color?: string }[] = [];
   private drawLabels() {
     const ctx = this.ctx, z = this.cam.zoom;
     ctx.font = `${Math.round(Math.max(11, 4 * z))}px "DotGothic16", monospace`;
@@ -203,7 +225,7 @@ export class Renderer {
       const w = ctx.measureText(l.text).width + 8;
       ctx.fillStyle = 'rgba(20,24,52,0.78)';
       ctx.fillRect(l.x * z - w / 2, l.y * z - 4 * z - 12, w, Math.max(14, 4 * z) + 4);
-      ctx.fillStyle = '#fbf6e6';
+      ctx.fillStyle = l.color ?? '#fbf6e6';
       ctx.fillText(l.text, l.x * z, l.y * z - 4 * z + 2);
     }
     this.labelQueue = [];
@@ -229,22 +251,58 @@ export class Renderer {
     else sp = humanSprite(n.role, n.cls, n.look, frame, n.facing < 0);
     const lunge = n.state === 'fight' && n.cd > 0.8 ? n.facing : 0;
     const carried = n.carry != null ? s.npcs.find((o) => o.id === n.carry) : undefined;
+    const fighter = n.role === 'fighter';
+    const faded = this.focusFighters && !fighter;
     return {
       depth: n.x + n.y,
       draw: () => {
-        this.shadow(px, py);
+        if (fighter && n.state !== 'down') this.ring(px, py, CLASS_COLOR[n.cls]);
+        else this.shadow(px, py);
+        if (faded) ctx.globalAlpha = 0.35;
         draw(ctx, sp, px + lunge, py);
+        ctx.globalAlpha = 1;
         if (carried) {
           const ls = lyingSprite(carried.role, carried.cls, carried.look);
           draw(ctx, ls, px, py - sp.ay + ls.ay - ls.h + 6);
         }
-        if (n.role === 'fighter' && (n.state === 'fight' || n.hp < maxHpCached(n)))
-          this.hpBar(px, py - sp.ay - 3, n.hp / maxHpCached(n), '#4ad06a');
+        if (fighter && n.state !== 'down') {
+          const by = py - sp.ay - 3;
+          this.hpBar(px + 2, by, n.hp / maxHpCached(n), '#4ad06a');
+          this.badge(px - 7, by + 1, CLASS_COLOR[n.cls]);
+        }
         if (n.state === 'wait' && n.goal === 'camp') this.campfire(px + 8, py, time);
+        const em = this.emotes.get(n.id);
+        if (em && time - em.t < 2.2) drawEmote(ctx, em.k, px, py - sp.ay - (fighter ? 6 : 1));
         if (sel) this.marker(px, py - sp.ay - 6);
       },
       hit: { x: px - 7, y: py - 19, w: 14, h: 20, sel: { kind: 'npc', id: n.id } },
     };
+  }
+
+  // pixel ellipse under adventurers, coloured by class
+  private ring(px: number, py: number, color: string) {
+    const ctx = this.lctx;
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.fillRect(px - 4, py, 8, 1);
+    ctx.fillStyle = color;
+    ctx.fillRect(px - 3, py - 2, 6, 1);
+    ctx.fillRect(px - 3, py + 2, 6, 1);
+    ctx.fillRect(px - 5, py - 1, 2, 1);
+    ctx.fillRect(px + 3, py - 1, 2, 1);
+    ctx.fillRect(px - 5, py + 1, 2, 1);
+    ctx.fillRect(px + 3, py + 1, 2, 1);
+    ctx.fillRect(px - 6, py, 1, 1);
+    ctx.fillRect(px + 5, py, 1, 1);
+  }
+
+  private badge(px: number, py: number, color: string) {
+    const ctx = this.lctx;
+    ctx.fillStyle = '#1a1a1a';
+    ctx.fillRect(px - 1, py - 2, 3, 5);
+    ctx.fillRect(px - 2, py - 1, 5, 3);
+    ctx.fillStyle = color;
+    ctx.fillRect(px, py - 1, 1, 3);
+    ctx.fillRect(px - 1, py, 3, 1);
   }
 
   private shadow(px: number, py: number) {
@@ -253,12 +311,25 @@ export class Renderer {
     this.lctx.fillRect(px - 3, py + 1, 6, 1);
   }
 
-  private hpBar(px: number, py: number, f: number, color: string) {
+  private hpBar(px: number, py: number, f: number, color: string, w = 14) {
     const ctx = this.lctx;
     ctx.fillStyle = '#1a1a1a';
-    ctx.fillRect(px - 7, py, 14, 3);
+    ctx.fillRect(px - w / 2, py, w, 3);
     ctx.fillStyle = color;
-    ctx.fillRect(px - 6, py + 1, Math.max(0, Math.round(12 * Math.min(1, f))), 1);
+    ctx.fillRect(px - w / 2 + 1, py + 1, Math.max(0, Math.round((w - 2) * Math.min(1, f))), 1);
+  }
+
+  private sparkle(px: number, top: number, w: number, time: number) {
+    const ctx = this.lctx;
+    for (let i = 0; i < 3; i++) {
+      const p = (time * 1.5 + i / 3) % 1;
+      if (p > 0.5) continue;
+      const x = Math.round(px - w / 2 + ((i * 37 + Math.floor(time * 1.5)) % Math.max(1, w)));
+      const y = Math.round(top + ((i * 11 + Math.floor(time * 1.5) * 5) % 10));
+      ctx.fillStyle = '#fff6b0';
+      ctx.fillRect(x, y - 1, 1, 3);
+      ctx.fillRect(x - 1, y, 3, 1);
+    }
   }
 
   private marker(px: number, py: number) {
@@ -304,21 +375,19 @@ export class Renderer {
       return;
     }
     const n = BUILDINGS[type].size;
-    const rot = placeRot(s, type, tx, ty, this.ghostRot);
-    const sp = buildingSprite(type, (rot < 0 ? this.ghostRot : rot) === 1);
+    const pl = placement(s, type, tx, ty, this.ghostRot);
+    const sp = buildingSprite(type, (pl ? pl.rot : this.ghostRot) === 1);
     ctx.globalAlpha = 0.7;
     draw(ctx, sp, px, py);
     ctx.globalAlpha = 1;
-    this.diamond(px, py, n, rot >= 0 ? '#7dff8a' : '#ff5a5a');
-    if (BUILDINGS[type].kind !== 'decor') {
-      const d = doorAt(tx, ty, n, rot < 0 ? this.ghostRot : rot);
-      this.diamond(sx(d.x, d.y), sy(d.x, d.y), 1, rot >= 0 ? '#ffe066' : '#ff9a5a');
-    }
+    this.diamond(px, py, n, pl ? '#7dff8a' : '#ff5a5a');
+    if (pl?.door) this.diamond(sx(pl.door.x, pl.door.y), sy(pl.door.x, pl.door.y), 1, '#ffe066');
   }
 
   private drawFloaters(s: GameState, sx: (x: number, y: number) => number, sy: (x: number, y: number) => number) {
     for (const f of s.fx) {
       if (f.kind === 'score') continue;
+      if (f.kind === 'emote') { const [id, k] = String(f.v).split(':'); this.emotes.set(Number(id), { k, t: this.lastTime }); continue; }
       if (this.floaters.length > 120) break;
       const text = f.kind === 'coin' ? `+${f.v}G` : f.kind === 'lvl' ? 'LV UP' : f.kind === 'item' ? `+${f.v}` : String(f.v);
       const color = f.kind === 'coin' ? '#ffd34a' : f.kind === 'lvl' ? '#7dffef' : f.kind === 'item' ? '#b6ff7a' : '#ffffff';
@@ -347,12 +416,20 @@ export class Renderer {
   }
 }
 
-function nightAlpha(t: number): number {
-  if (t >= 0.7 && t < 0.8) return ((t - 0.7) / 0.1) * 0.45;
-  if (t >= 0.8 || t < 0.0) return 0.45;
-  if (t < 0.06) return 0.45 * (1 - t / 0.06);
-  return 0;
-}
-
 const maxHpCached = (n: Npc) => maxHp(n);
-const monsterMaxHp = (s: GameState, type: string) => monsterStats(s, type).maxHp;
+
+const shinyCache = new Map<string, Sprite>();
+function shinySprite(sp: Sprite, key: string): Sprite {
+  let out = shinyCache.get(key);
+  if (!out) {
+    const c = makeCanvas(sp.w, sp.h);
+    const cx = c.getContext('2d')!;
+    cx.drawImage(sp.img, sp.x, sp.y, sp.w, sp.h, 0, 0, sp.w, sp.h);
+    cx.globalCompositeOperation = 'source-atop';
+    cx.fillStyle = 'rgba(255,214,90,0.5)';
+    cx.fillRect(0, 0, sp.w, sp.h);
+    out = { ...sp, img: c, x: 0, y: 0 };
+    shinyCache.set(key, out);
+  }
+  return out;
+}

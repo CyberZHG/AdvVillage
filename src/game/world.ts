@@ -59,7 +59,7 @@ export const bsize = (b: Building) => BUILDINGS[b.type].size;
 // rot 0: door on the +x (lower-right) face, rot 1: door on the +y (lower-left) face
 export const doorAt = (x: number, y: number, n: number, rot: number): P =>
   rot ? { x: x + n - 1, y: y + n } : { x: x + n, y: y + n - 1 };
-export const doorOf = (b: Building): P => doorAt(b.x, b.y, bsize(b), b.rot ?? 0);
+export const doorOf = (b: Building): P => b.door ?? doorAt(b.x, b.y, bsize(b), b.rot ?? 0);
 export const covers = (b: Building, x: number, y: number) =>
   x >= b.x && y >= b.y && x < b.x + bsize(b) && y < b.y + bsize(b);
 
@@ -161,19 +161,33 @@ function footprintFree(s: GameState, n: number, x: number, y: number): boolean {
   return true;
 }
 
-// returns the rotation to use (preferring `pref`), or -1 when the spot is invalid
-export function placeRot(s: GameState, type: string, x: number, y: number, pref = 0): number {
+export interface Placement { rot: number; door: P | null }
+
+// any road touching a side of the footprint can serve as the entrance; the two front faces are
+// tried first (they show the door), the back faces after (the sprite keeps its door on that side)
+export function placement(s: GameState, type: string, x: number, y: number, pref = 0): Placement | null {
   const d = BUILDINGS[type];
-  if (!footprintFree(s, d.size, x, y)) return -1;
-  if (d.kind === 'decor') return pref;
-  for (const rot of [pref, 1 - pref]) {
-    const door = doorAt(x, y, d.size, rot);
-    if (isRoad(door.x, door.y) && !blocked(s, door.x, door.y)) return rot;
+  const n = d.size;
+  if (!footprintFree(s, n, x, y)) return null;
+  if (d.kind === 'decor') return { rot: pref, door: null };
+  const side = (k: number) => {
+    const out: { p: P; rot: number }[] = [];
+    for (let i = n - 1; i >= 0; i--) {
+      if (k === 0) out.push({ p: { x: x + n, y: y + i }, rot: 0 });
+      if (k === 1) out.push({ p: { x: x + i, y: y + n }, rot: 1 });
+      if (k === 2) out.push({ p: { x: x + i, y: y - 1 }, rot: 0 });
+      if (k === 3) out.push({ p: { x: x - 1, y: y + i }, rot: 1 });
+    }
+    return out;
+  };
+  const order = pref ? [1, 0, 3, 2] : [0, 1, 2, 3];
+  for (const k of order) for (const c of side(k)) {
+    if (isRoad(c.p.x, c.p.y) && !blocked(s, c.p.x, c.p.y)) return { rot: c.rot, door: c.p };
   }
-  return -1;
+  return null;
 }
 
-export const canPlaceAt = (s: GameState, type: string, x: number, y: number) => placeRot(s, type, x, y) >= 0;
+export const canPlaceAt = (s: GameState, type: string, x: number, y: number) => placement(s, type, x, y) !== null;
 
 export function randomStreetTile(s: GameState): P {
   if (!villageRoads.length) return randomVillageTile(s);

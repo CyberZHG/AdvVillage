@@ -1,16 +1,20 @@
 import './ui/style.css';
-import { detectLang, setLang, t } from './i18n';
+import { detectLang, getLang, setLang, t } from './i18n';
 import { loadArt } from './render/art';
 import { Renderer } from './render/renderer';
 import { newGame } from './game/state';
 import { step } from './game/sim';
 import { TICK } from './game/constants';
 import { VILLAGES } from './game/data';
-import { deleteSave, hasSave, loadGame, loadMeta, saveGame, saveMeta } from './game/save';
+import { deleteSave, exportAll, hasSave, importAll, loadGame, loadMeta, saveGame, saveMeta } from './game/save';
+import { checkAchievements } from './game/achievements';
+import { log } from './game/state';
+import { download, makeReportImage, makeShareImage, shareImage, toBlob } from './ui/share';
+import { buyOffer, currentBoss } from './game/events';
 import { build, canBuild, demolish, expand, forgeUpgrade, launchExpedition, placeRoad, removeRoad, upgrade } from './game/econ';
 import { bld } from './game/state';
 import {
-  confirmHtml, mountHud, pendingDemolish, resetHtmlCache, scoreModalHtml, setBuildCat, setPendingDemolish, titleHtml, updateHud,
+  confirmHtml, importModalHtml, mountHud, reportHtml, shareModalHtml, pendingDemolish, resetHtmlCache, scoreModalHtml, setBuildCat, setPendingDemolish, titleHtml, updateHud,
   type Ctl, type Tab,
 } from './ui/ui';
 import type { GameState } from './game/types';
@@ -32,6 +36,7 @@ const ctl: Ctl = {
   get placing() { return renderer.ghost; },
   get selected() { return renderer.selected; },
   get labels() { return renderer.labels; },
+  get focus() { return renderer.focusFighters; },
   act: (a: string, arg: string) => act(a + (arg ? ':' + arg : '')),
 };
 
@@ -68,7 +73,42 @@ function startGame(village: string, fresh: boolean) {
   renderer.centerOn(32, 32);
   speed = 1;
   last = performance.now();
+  achievements();
   refresh();
+}
+
+function achievements() {
+  if (!s) return;
+  const fresh = checkAchievements(s, meta);
+  if (!fresh.length) return;
+  for (const id of fresh) log(s, 'log.achievement', { a: `@ach.${id}.name` });
+  toast(fresh.length > 3 ? t('ui.achMany', { n: fresh.length }) : t('ui.achUnlocked', { a: fresh.map((id) => t(`ach.${id}.name`)).join(' / ') }));
+  saveMeta(meta);
+}
+
+let shareBlob: Blob | null = null;
+async function openShare(report?: number) {
+  if (!s) return;
+  const canvas = report != null ? await makeReportImage(s, report) : await makeShareImage(s, meta, renderer.view);
+  shareBlob = await toBlob(canvas);
+  const file = new File([shareBlob], 'a.png', { type: 'image/png' });
+  showModal(shareModalHtml(canvas.toDataURL('image/png'), !!navigator.canShare?.({ files: [file] })));
+}
+
+function exportText() { return exportAll(meta, s); }
+
+function doImport() {
+  const text = ($('import-text') as HTMLTextAreaElement | null)?.value ?? '';
+  try {
+    if (s) saveGame(s);
+    Object.assign(meta, importAll(text));
+    setLang(meta.lang ?? getLang());
+    showModal(null);
+    toast(t('ui.importDone'));
+    showTitle();
+  } catch {
+    toast(t('ui.importFail'));
+  }
 }
 
 function onScored() {
@@ -78,6 +118,7 @@ function onScored() {
   let unlocked: string | null = null;
   if (idx + 1 < VILLAGES.length && meta.unlocked < idx + 1) { meta.unlocked = idx + 1; unlocked = VILLAGES[idx + 1].key; }
   saveMeta(meta);
+  achievements();
   showModal(scoreModalHtml(s, unlocked));
 }
 
@@ -96,12 +137,14 @@ function act(a: string) {
     case 'cancelPlace': renderer.ghost = null; break;
     case 'rotate': renderer.ghostRot = 1 - renderer.ghostRot; break;
     case 'labels': renderer.labels = !renderer.labels; break;
+    case 'focus': renderer.focusFighters = !renderer.focusFighters; break;
     case 'cat': setBuildCat(x); break;
     case 'select': {
       renderer.selected = { kind: x as 'npc' | 'bld' | 'mon', id: Number(y) };
       const id = Number(y);
       if (x === 'bld') { const b = bld(s!, id); if (b) renderer.centerOn(b.x + 1, b.y + 1); }
       if (x === 'npc') { const n = s!.npcs.find((o) => o.id === id); if (n && n.inside == null && n.state !== 'away') renderer.centerOn(n.x, n.y); }
+      if (x === 'mon') { const m = s!.monsters.find((o) => o.id === id); if (m) renderer.centerOn(m.x, m.y); }
       if (window.innerWidth < 900) tab = null;
       break;
     }
@@ -132,6 +175,16 @@ function act(a: string) {
       return;
     case 'confirmNew': deleteSave(x); showModal(null); startGame(x, true); return;
     case 'closeModal': showModal(null); break;
+    case 'share': void openShare(); return;
+    case 'reportShare': void openShare(Number(x)); return;
+    case 'report': if (s) showModal(reportHtml(s, Number(x))); return;
+    case 'buy': if (s && !buyOffer(s, Number(x))) toast(t('ui.notEnough')); break;
+    case 'shareDownload': if (shareBlob) download(shareBlob, `adventurer-village-${Date.now()}.png`); return;
+    case 'shareNative': if (shareBlob) void shareImage(shareBlob, t('game.title')); return;
+    case 'export': download(new Blob([exportText()], { type: 'text/plain' }), `advvillage-${new Date().toISOString().slice(0, 10)}.sav`); toast(t('ui.exported')); return;
+    case 'exportCopy': navigator.clipboard?.writeText(exportText()).then(() => toast(t('ui.copied')), () => toast(t('ui.copyFail'))); return;
+    case 'importOpen': showModal(importModalHtml()); return;
+    case 'importDo': doImport(); return;
     case 'zoomIn': renderer.zoomBy(1); break;
     case 'zoomOut': renderer.zoomBy(-1); break;
   }
@@ -142,6 +195,11 @@ function refresh() {
   if (s) updateHud(ctl, tab);
 }
 
+document.addEventListener('change', (e) => {
+  const input = e.target as HTMLInputElement;
+  if (input.id !== 'import-file' || !input.files?.[0]) return;
+  input.files[0].text().then((txt) => { ($('import-text') as HTMLTextAreaElement).value = txt; });
+});
 document.addEventListener('click', (e) => {
   const el = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
   if (el && !(el as HTMLButtonElement).disabled) act(el.dataset.act!);
@@ -250,12 +308,14 @@ function advance() {
   last = now;
   if (!s || !speed) return;
   acc += dt * speed;
-  const day = s.day, scored = s.scored;
+  const day = s.day, scored = s.scored, reports = s.reports.length, hadBoss = !!currentBoss(s);
   let n = 0;
   while (acc >= TICK && n < MAX_STEPS) { step(s, TICK); acc -= TICK; n++; }
   if (n >= MAX_STEPS) acc = 0;
-  if (s.day !== day) saveGame(s);
+  if (s.day !== day) { saveGame(s); achievements(); }
   if (!scored && s.scored) onScored();
+  if (s.reports.length > reports) toast(t('ui.reportIssued', { y: s.reports[s.reports.length - 1].year }));
+  if (!hadBoss && currentBoss(s)) toast(t('ui.bossAlert'));
 }
 
 let uiTimer = 0;

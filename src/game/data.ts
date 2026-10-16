@@ -10,37 +10,31 @@ export const ITEMS: Record<string, { value: number }> = {
   cloth: { value: 6 }, iron: { value: 12 }, bone: { value: 14 }, crystal: { value: 20 },
   hardwood: { value: 16 }, dust: { value: 22 }, silk: { value: 24 }, scale: { value: 26 },
   ecto: { value: 35 }, gem: { value: 60 }, wyvern: { value: 70 }, dragon: { value: 90 },
+  venom: { value: 6 }, spore: { value: 4 }, feather: { value: 5 }, shell: { value: 10 }, horn: { value: 18 },
+  frostShard: { value: 30 }, goldOre: { value: 40 }, soulGem: { value: 80 }, emberCore: { value: 55 },
+  starDust: { value: 70 }, mithril: { value: 120 },
 };
 export const BASE_ITEMS = ['wood', 'stone', 'fruit', 'meat'];
 export const FOODS = ['meat', 'fruit'];
 export const NODE_ITEM: Record<NodeKind, string> = { tree: 'wood', rock: 'stone', bush: 'fruit' };
 
-export interface MonsterDef { hp: number; atk: number; def: number; base: number; zone: number; drops: [string, number][] }
-
-// zone -1 = expedition only
-export const MONSTERS: Record<string, MonsterDef> = {
-  slime: { hp: 22, atk: 4, def: 1, base: 1, zone: 0, drops: [['gel', 3], ['meat', 1]] },
-  bat: { hp: 16, atk: 6, def: 1, base: 2, zone: 0, drops: [['wing', 2], ['meat', 1]] },
-  wolf: { hp: 38, atk: 8, def: 3, base: 6, zone: 1, drops: [['meat', 2], ['pelt', 1], ['fang', 1]] },
-  goblin: { hp: 40, atk: 9, def: 3, base: 9, zone: 1, drops: [['cloth', 2], ['iron', 1]] },
-  skeleton: { hp: 55, atk: 12, def: 5, base: 16, zone: 2, drops: [['bone', 2], ['iron', 1]] },
-  golem: { hp: 90, atk: 13, def: 8, base: 22, zone: 2, drops: [['crystal', 1], ['stone', 2]] },
-  treant: { hp: 80, atk: 10, def: 6, base: 8, zone: -1, drops: [['hardwood', 2], ['fruit', 1]] },
-  fairy: { hp: 30, atk: 14, def: 2, base: 10, zone: -1, drops: [['dust', 1], ['fruit', 1]] },
-  spider: { hp: 50, atk: 13, def: 4, base: 16, zone: -1, drops: [['silk', 2], ['meat', 1]] },
-  lizard: { hp: 60, atk: 12, def: 7, base: 18, zone: -1, drops: [['scale', 1], ['meat', 2]] },
-  ghost: { hp: 45, atk: 16, def: 3, base: 28, zone: -1, drops: [['ecto', 1]] },
-  mimic: { hp: 100, atk: 15, def: 10, base: 32, zone: -1, drops: [['gem', 1], ['iron', 2]] },
-  wyvern: { hp: 110, atk: 18, def: 8, base: 45, zone: -1, drops: [['wyvern', 1], ['meat', 3]] },
-  drake: { hp: 150, atk: 20, def: 11, base: 55, zone: -1, drops: [['dragon', 1], ['meat', 3]] },
-};
-export const ZONE_MONSTERS = [0, 1, 2].map((z) => Object.keys(MONSTERS).filter((k) => MONSTERS[k].zone === z));
+export { MONSTERS, zoneMonsters, spawnWeight, mapZone, type MonsterDef, type Fam } from './monsters';
 
 export const CLASSES = {
   warrior: { hp: 34, hpG: 9, atk: 5, atkG: 2, def: 3, defG: 1.2, range: 1, interval: 1.0 },
+  knight: { hp: 40, hpG: 10.5, atk: 4, atkG: 1.7, def: 4, defG: 1.6, range: 1, interval: 1.15 },
   archer: { hp: 26, hpG: 7, atk: 6, atkG: 2.3, def: 2, defG: 0.8, range: 3.2, interval: 1.1 },
+  rogue: { hp: 24, hpG: 6.5, atk: 5, atkG: 1.8, def: 1.5, defG: 0.7, range: 1, interval: 0.7 },
   mage: { hp: 22, hpG: 6, atk: 8, atkG: 2.7, def: 1, defG: 0.7, range: 3.2, interval: 1.4 },
+  cleric: { hp: 30, hpG: 8, atk: 5, atkG: 1.9, def: 2, defG: 1.0, range: 2.5, interval: 1.2 },
+  lancer: { hp: 32, hpG: 8.5, atk: 5.5, atkG: 2.2, def: 2.5, defG: 1.0, range: 1.6, interval: 1.05 },
+  monk: { hp: 30, hpG: 8, atk: 4.5, atkG: 1.7, def: 2, defG: 0.9, range: 1, interval: 0.8 },
 };
+export type ClassKey = keyof typeof CLASSES;
+export const CLASS_KEYS = Object.keys(CLASSES) as ClassKey[];
+export const GATHER_JOBS = ['woodcutter', 'miner', 'forager'] as const;
+export const CIVILIAN_JOBS = ['farmer', 'merchant', 'elder', 'craftsman', 'maid', 'scholar'] as const;
+export const TOURIST_KINDS = ['traveler', 'noble', 'bard', 'pilgrim', 'scholar'] as const;
 
 export interface EquipDef { key: string; tier: number; atk: number; def: number; hp: number; price: number; mat?: string }
 
@@ -130,10 +124,16 @@ export const isPeak = (type: string, t: number) => inRange(t, BUILDINGS[type].pe
 export interface ExpeditionDef { key: string; unlockYear: number; days: number; monsters: string[] }
 
 export const EXPEDITIONS: ExpeditionDef[] = [
-  { key: 'woods', unlockYear: 1, days: 6, monsters: ['treant', 'fairy'] },
-  { key: 'mine', unlockYear: 3, days: 8, monsters: ['spider', 'lizard'] },
-  { key: 'ruins', unlockYear: 6, days: 10, monsters: ['ghost', 'mimic'] },
-  { key: 'ridge', unlockYear: 10, days: 12, monsters: ['wyvern', 'drake'] },
+  { key: 'woods', unlockYear: 1, days: 6, monsters: ['treant', 'fairy', 'pixie', 'bloomHorror', 'forestBear', 'elderStag'] },
+  { key: 'mine', unlockYear: 2, days: 7, monsters: ['spider', 'lizard', 'koboldMiner', 'caveBat', 'ironGolem', 'crystalSpider'] },
+  { key: 'marsh', unlockYear: 3, days: 8, monsters: ['swampSlime', 'lizardman', 'swampSerpent', 'marshHag', 'bloodMoss', 'giantToad'] },
+  { key: 'ruins', unlockYear: 5, days: 9, monsters: ['ghost', 'mimic', 'mummy', 'sentinel', 'cursedArmor', 'lich'] },
+  { key: 'tomb', unlockYear: 6, days: 10, monsters: ['sandScorpion', 'scarab', 'cobra', 'sandGolem', 'mummyLord', 'sphinx'] },
+  { key: 'frozen', unlockYear: 8, days: 10, monsters: ['frostWolf', 'iceGolem', 'snowHarpy', 'iceWraith', 'frostGiant', 'iceDrake'] },
+  { key: 'volcano', unlockYear: 10, days: 11, monsters: ['magmaSlime', 'fireImp', 'salamander', 'lavaGolem', 'hellhound', 'phoenix'] },
+  { key: 'sky', unlockYear: 12, days: 12, monsters: ['thunderBird', 'cloudSlime', 'skyWisp', 'griffin', 'stormSpirit', 'sentry'] },
+  { key: 'ridge', unlockYear: 13, days: 12, monsters: ['wyvern', 'drake', 'greenDragon', 'redDragon', 'blackDragon'] },
+  { key: 'abyss', unlockYear: 15, days: 14, monsters: ['demon', 'shadowBeast', 'voidSlime', 'eldritchEye', 'boneDragon', 'abyssLord'] },
 ];
 export const EXPEDITION_PARTY = 4;
 

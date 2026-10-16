@@ -1,14 +1,17 @@
 import { DAY, EXPANSIONS } from './constants';
+import { comboIncome, discoverCombos } from './combos';
 import { ROAD_COST, BUILDINGS, EQUIP, EXPEDITIONS, shopTier, type Cost } from './data';
 import { bldExpNeed, gainExp } from './level';
 import { assignHousing, fx, log, mods, newId, ofKind, residents, year } from './state';
-import { doorOf, invalidateGrid, covers, placeRot, setRoad, syncBounds, villageDist } from './world';
+import { doorOf, invalidateGrid, covers, placement, setRoad, syncBounds, villageDist } from './world';
 import type { Building, GameState, Score } from './types';
 
 export function earn(s: GameState, b: Building, amount: number) {
-  amount = Math.max(1, Math.round(amount));
+  amount = Math.max(1, Math.round(amount * comboIncome(s, b)));
   s.money += amount;
   s.stats.income += amount;
+  s.ys.income += amount;
+  b.yi = (b.yi ?? 0) + amount;
   const before = b.level;
   gainExp(b, amount, bldExpNeed);
   if (b.level !== before && (b.level <= 5 || b.level % 5 === 0)) {
@@ -42,15 +45,16 @@ export function canBuild(s: GameState, type: string): boolean {
 }
 
 export function build(s: GameState, type: string, x: number, y: number, pref = 0): boolean {
-  const rot = placeRot(s, type, x, y, pref);
-  if (!canBuild(s, type) || rot < 0) return false;
+  const pl = placement(s, type, x, y, pref);
+  if (!canBuild(s, type) || !pl) return false;
   payCost(s, buildCost(s, type));
-  const b: Building = { id: newId(s), type, x, y, rot, level: 1, exp: 0 };
+  const b: Building = { id: newId(s), type, x, y, rot: pl.rot, door: pl.door, level: 1, exp: 0 };
   s.buildings.push(b);
   s.nodes = s.nodes.filter((n) => !covers(b, n.x, n.y));
   invalidateGrid();
   assignHousing(s);
   log(s, 'log.built', { b: '@b.' + type });
+  for (const c of discoverCombos(s)) log(s, 'log.combo', { c: `@combo.${c}` });
   return true;
 }
 
@@ -164,6 +168,6 @@ export function computeScore(s: GameState): Score {
   const bldLevels = s.buildings.reduce((a, b) => a + b.level, 0);
   const fame = s.profiles.reduce((a, p) => a + p.level, 0);
   const total = npcs * 150 + buildings * 100 + npcLevels * 10 + bldLevels * 30 + fame * 2;
-  const rank = total >= 150000 ? 'S' : total >= 80000 ? 'A' : total >= 40000 ? 'B' : total >= 15000 ? 'C' : 'D';
+  const rank = total >= 180000 ? 'S' : total >= 100000 ? 'A' : total >= 50000 ? 'B' : total >= 20000 ? 'C' : 'D';
   return { npcs, buildings, npcLevels, bldLevels, fame, total, rank };
 }

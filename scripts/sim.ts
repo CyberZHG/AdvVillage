@@ -73,3 +73,9 @@ import { bldExpNeed } from '../src/game/level';
 const inc: Record<string, number> = {};
 for (const b of s.buildings) { let e = b.exp; for (let l = 1; l < b.level; l++) e += bldExpNeed(l); inc[b.type] = Math.round((inc[b.type] ?? 0) + e); }
 console.log('income by type', inc);
+const count = (k: string) => s.log.length; void count;
+console.log('reports', s.reports.length, 'last report', JSON.stringify({ ...s.reports[s.reports.length - 1], events: s.reports[s.reports.length - 1]?.events.length }));
+console.log('combos seen', s.comboSeen.join(','));
+console.log('couples', s.couples.length, 'partners', s.npcs.filter((n) => n.partner != null).length, 'titled', s.npcs.filter((n) => n.titles?.length).length, 'titles', [...new Set(s.npcs.flatMap((n) => n.titles ?? []))].join(','));
+console.log('shinySeen', s.shinySeen.length, 'seen', s.seen.length, 'weather', s.weather, 'effects', JSON.stringify(s.effects));
+console.log('bosses total', s.reports.reduce((a, r) => a + r.bosses, 0) + s.ys.bosses, 'kids', s.couples.reduce((a, c) => a + c.kids, 0));

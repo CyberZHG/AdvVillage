@@ -1,25 +1,16 @@
 # Adventurer Village
 
-A pixel-art village builder in the spirit of Kairosoft games. You build the village; adventurers, gatherers, villagers and visitors run it on their own.
+English | [中文](README.zh-CN.md)
 
-## Development
+**Play:** https://cyberzhg.github.io/AdvVillage/
 
-```sh
-npm install
-npm run dev        # local dev server
-npm run build      # type-check + production build into dist/
-npm run sim -- maple 16   # headless 16-year balance run with a naive auto-builder
-```
+A pixel-art village builder in the spirit of Kairosoft games. You lay roads and raise buildings; adventurers, gatherers, villagers and visitors live their lives on their own. The village keeps running even when you leave it idle.
 
-## Deployment
-
-Pushing to `main` runs `.github/workflows/deploy.yml`, which builds and publishes to GitHub Pages.
-Enable it once under **Settings → Pages → Source: GitHub Actions**.
-
-## Project layout
-
-- `src/game/` — simulation (pure TypeScript, no DOM): data tables, AI, economy, saves
-- `src/render/` — isometric canvas renderer, sprite atlas loader
-- `src/ui/` — HUD, panels, styles
-- `src/i18n/` — language packs; add a language by creating a pack and registering it in `index.ts`
-- `public/assets/sprites.png` + `sprites.json` — sprite sheet and atlas (frame name → rect + anchor)
+- **Build** houses, shops, restaurants, taverns, a spa, a theater, an arena and more. Every door faces a road, and certain buildings placed near each other form combos that boost income and appeal.
+- **Adventurers** in eight classes hunt monsters by themselves, take subjugation requests, buy better gear, train at the forge, earn titles, form partnerships and sometimes marry and raise the next generation.
+- **100 monsters** roam the wilds around each village or wait at ten expedition sites, with rare shining variants and bosses that the whole guild rallies against.
+- **Visitors** sightsee and spend money; regulars grow familiar with the village and send gifts.
+- **Seasons, weather and festivals** change the scenery and the crowds. Random events and travelling merchants keep things moving without ever pausing the game.
+- **Evaluation** after 16 years unlocks the next of five villages, each with its own land and challenges. Play continues afterwards.
+- Achievements, a bestiary, a yearly village gazette, shareable images, and save import/export.
+- Available in English, 中文, 日本語 and 한국어.

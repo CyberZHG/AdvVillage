@@ -10,7 +10,7 @@
   --bad: #ff7a6a;
   --btn: #f6d67a;
   --btn-text: #3a2814;
-  --font: 'DotGothic16', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
+  --font: 'DotGothic16', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Hiragino Sans', 'Yu Gothic', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', monospace;
 }
 
 * { box-sizing: border-box; }
@@ -100,6 +100,8 @@ a[data-act] { color: var(--accent); cursor: pointer; text-decoration: underline;
 .card-main { flex: 1; min-width: 0; }
 .row { display: flex; gap: 8px; align-items: center; padding: 5px 4px; border-bottom: 1px solid rgba(243, 231, 197, 0.12); }
 .row.click { cursor: pointer; }
+.row.dim { opacity: 0.5; }
+.mimg.q { display: inline-block; width: 34px; text-align: center; font-size: 20px; }
 .row.click:hover { background: rgba(255, 255, 255, 0.08); }
 .box { padding: 6px 8px; background: rgba(255, 255, 255, 0.07); border-radius: 4px; margin-bottom: 8px; }
 .btns { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
@@ -154,3 +156,20 @@ a[data-act] { color: var(--accent); cursor: pointer; text-decoration: underline;
   #zoom { bottom: 96px; }
   .bar { width: 80px; }
 }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; border: 1px solid #000; }
+.modal-box.wide { width: min(680px, calc(100vw - 24px)); max-height: calc(100vh - 24px); display: flex; flex-direction: column; }
+.share-img { width: 100%; image-rendering: auto; border: 2px solid #000; }
+.ach { font-size: 22px; width: 28px; text-align: center; color: #6a7090; }
+.ach.got { color: var(--accent); }
+#import-text { width: 100%; margin: 8px 0; font-family: monospace; font-size: 11px; background: #0e1330; color: var(--text); border: 1px solid var(--edge); border-radius: 4px; }
+#import-file { color: var(--text); }
+.fest { color: #ffb0d0; margin-left: 6px; }
+.bossbadge { margin-left: 8px; padding: 1px 6px; background: #c83a3a; color: #fff; border-radius: 3px; cursor: pointer; animation: pulse 1s infinite alternate; }
+@keyframes pulse { from { opacity: 0.6; } to { opacity: 1; } }
+img.bimg.xs { width: 26px; margin-right: 2px; }
+.tag.good { color: var(--good); }
+.shiny { color: #ffd34a; }
+.paper .win-body { background: #f2e8d0; color: #3a2a1a; }
+.paper .kv > span, .paper .meta, .paper small { color: #7a6a50; }
+.paper h3 { color: #8a3a2a; border-color: #c8b890; }
+ul.news { margin: 4px 0; padding-left: 18px; line-height: 1.5; }

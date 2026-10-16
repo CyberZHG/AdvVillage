@@ -1,14 +1,17 @@
-import { CLASSES, EQUIP, MONSTERS, BUILDINGS, villageMods, equipByKey, type NodeKind } from './data';
+import { CLASSES, CLASS_KEYS, EQUIP, MONSTERS, BUILDINGS, villageMods, equipByKey, type NodeKind } from './data';
 import { HOUSE_CAP, DAY, NIGHT_START, MORNING } from './constants';
 import { forgeMult, lvMult } from './level';
 import { pick, randi, weighted } from './util';
 import { baseRoads, inVillage, isRoad, randomZoneTile, syncBounds, syncRoads, villageDist, VB } from './world';
-import type { Building, Cls, GameState, LogParam, Look, Npc, ResNode, Role } from './types';
+import { makeLook, randomJob } from './looks';
+import { comboAppeal } from './combos';
+import { titleBonus } from './social';
+import type { Building, Cls, GameState, LogParam, Monster, Npc, ResNode, Role } from './types';
 
-export const NAME_POOL = 64;
-export const LOOKS = { skin: 3, hair: 6, cloth: 4, pants: 3 };
+export const NAME_POOL = 128;
 
 export const newId = (s: GameState) => s.nextId++;
+export const emptyYear = (): GameState['ys'] => ({ income: 0, kills: 0, tourists: 0, quests: 0, expeditions: 0, bosses: 0, shinies: 0, events: [] });
 export const mods = (s: GameState) => villageMods(s.village);
 export const bld = (s: GameState, id: number | null) => (id == null ? undefined : s.buildings.find((b) => b.id === id));
 export const npcById = (s: GameState, id: number | null) => (id == null ? undefined : s.npcs.find((n) => n.id === id));
@@ -19,8 +22,11 @@ export const isNight = (s: GameState) => tod(s) >= NIGHT_START || tod(s) < MORNI
 export const year = (s: GameState) => Math.floor(s.day / 120) + 1;
 export const residents = (s: GameState) => s.npcs.filter((n) => n.role !== 'tourist');
 
+const NOTABLE = /^(ev\.(?!merchantLeft)|log\.(bossDown|shiny|married|child|combo|expanded|achievement|title|expReturn|score))/;
+
 export function log(s: GameState, k: string, p?: Record<string, LogParam>) {
   s.log.push({ t: s.day, k, p });
+  if (s.ys && NOTABLE.test(k)) { s.ys.events.push({ t: s.day, k, p }); if (s.ys.events.length > 30) s.ys.events.shift(); }
   if (s.log.length > 120) s.log.splice(0, s.log.length - 120);
 }
 
@@ -39,15 +45,13 @@ export function freshName(s: GameState): number {
   return randi(0, NAME_POOL * 8);
 }
 
-export const randomLook = (): Look => ({
-  skin: randi(0, LOOKS.skin - 1), hair: randi(0, LOOKS.hair - 1),
-  cloth: randi(0, LOOKS.cloth - 1), pants: randi(0, LOOKS.pants - 1),
-});
 
-export function makeNpc(s: GameState, role: Role, x: number, y: number, level = 1, cls?: Cls): Npc {
+export function makeNpc(s: GameState, role: Role, x: number, y: number, level = 1, cls?: Cls, job?: string): Npc {
+  const c = cls ?? pick(CLASS_KEYS);
+  const j = job ?? randomJob(role);
   const n: Npc = {
-    id: newId(s), role, cls: cls ?? pick(['warrior', 'archer', 'mage'] as Cls[]), name: freshName(s),
-    look: randomLook(), level, exp: 0, hp: 1, hunger: 80, mood: 70, money: role === 'fighter' ? 60 : 30,
+    id: newId(s), role, cls: c, job: j, name: freshName(s),
+    look: makeLook(role, c, j), level, exp: 0, hp: 1, hunger: 80, mood: 70, money: role === 'fighter' ? 60 : 30,
     home: null, x: x + 0.5, y: y + 0.5, path: [], state: 'idle', goal: null, goalId: 0, inside: null,
     timer: 0, cd: 0, facing: 1, weapon: null, armor: null, accessory: null, bag: {}, quest: null,
     carry: null, rescuer: null, downT: 0, repath: 0, profile: -1, plan: [], noFood: 0, kills: 0,
@@ -63,6 +67,7 @@ export function maxHp(n: Npc): number {
   let hp = c.hp + c.hpG * n.level;
   hp += equipByKey(n.armor)?.hp ?? 0;
   hp += equipByKey(n.accessory)?.hp ?? 0;
+  hp *= titleBonus(n).hp;
   return Math.round(hp);
 }
 
@@ -79,13 +84,17 @@ export function fighterStats(s: GameState, n: Npc): Stats {
   if (n.home == null) m *= 0.85;
   if (n.hunger < 20) m *= 0.75;
   if (n.mood > 70) m *= 1.05;
-  return { maxHp: maxHp(n), atk: atk * m, def: def * m, range: c.range, interval: c.interval };
+  const tb = titleBonus(n);
+  return { maxHp: maxHp(n), atk: atk * m * tb.atk, def: def * m * tb.def, range: c.range, interval: c.interval };
 }
 
-export function monsterStats(s: GameState, type: string) {
-  const d = MONSTERS[type], L = s.mlv[type].level;
+// bosses carry their own level and a much larger health pool
+export function monsterStats(s: GameState, type: string, m?: Monster) {
+  const d = MONSTERS[type], L = m?.lv ?? s.mlv[type].level;
   const g = 1 + 0.25 * (L - 1);
-  return { maxHp: Math.round(d.hp * g), atk: d.atk * g, def: d.def * (1 + 0.2 * (L - 1)), level: L };
+  const hp = d.hp * g * (m?.boss != null ? 8 : 1) * (m?.shiny ? 1.5 : 1);
+  const atk = d.atk * g * (m?.boss != null ? 1.4 : 1);
+  return { maxHp: Math.round(hp), atk, def: d.def * (1 + 0.2 * (L - 1)) * (m?.boss != null ? 1.2 : 1), level: L };
 }
 
 export function debuffs(n: Npc): string[] {
@@ -112,7 +121,7 @@ export function assignHousing(s: GameState) {
 }
 
 export function attraction(s: GameState): number {
-  return s.buildings.reduce((a, b) => a + BUILDINGS[b.type].attraction * lvMult(b.level), 0);
+  return s.buildings.reduce((a, b) => a + BUILDINGS[b.type].attraction * lvMult(b.level), 0) + comboAppeal(s);
 }
 
 export function addItem(s: GameState, item: string, n: number) {
@@ -135,7 +144,9 @@ export function newGame(village: string): GameState {
     items: { wood: 40, stone: 30, fruit: 30, meat: 0 },
     buildings: [], nodes: [], monsters: [], npcs: [], profiles: [], quests: [], exp: null,
     mlv: {}, wlv: {}, disc: ['wood', 'stone', 'fruit'], seen: [], nextId: 1, log: [], scored: false, score: null,
-    timers: { spawn: 0, node: 0, rescue: 0 }, stats: { income: 0, lastIncome: 0, kills: 0, tourists: 0 }, fx: [],
+    timers: { spawn: 0, node: 0, rescue: 0 }, stats: { income: 0, lastIncome: 0, kills: 0, tourists: 0, quests: 0, rescues: 0, expeditions: 0, expLocs: [] },
+    comboSeen: [], weather: 'clear', effects: [], bonds: {}, couples: [], reports: [], ys: emptyYear(), shinySeen: [],
+    merchant: null, nextBoss: 40, fx: [],
   };
   const m = villageMods(village);
   for (const [k, d] of Object.entries(MONSTERS)) s.mlv[k] = { level: d.base + m.monsterLevel, exp: 0 };
@@ -153,7 +164,7 @@ export function newGame(village: string): GameState {
   }
   const g = guild(s);
   for (const cls of ['warrior', 'archer', 'mage'] as Cls[]) s.npcs.push(makeNpc(s, 'fighter', g.x + 2, g.y + 1, 1, cls));
-  s.npcs.push(makeNpc(s, 'gatherer', g.x + 2, g.y + 1));
+  s.npcs.push(makeNpc(s, 'gatherer', g.x + 2, g.y + 1, 1, undefined, 'forager'));
   assignHousing(s);
   log(s, 'log.welcome', { village: '@village.' + village + '.name' });
   return s;

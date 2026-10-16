@@ -1,22 +1,28 @@
 import {
-  BUILDINGS, EQUIP, EXPEDITIONS, EXPEDITION_PARTY, FOODS, ITEMS, MONSTERS, NODE_ITEM, ZONE_MONSTERS,
+  BUILDINGS, EQUIP, EXPEDITIONS, EXPEDITION_PARTY, FOODS, ITEMS, MONSTERS, NODE_ITEM, villageDef, zoneMonsters, spawnWeight,
   shopTier, equipByKey, isOpen, isPeak, type EquipDef, type NodeKind,
 } from './data';
 import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, EAST_EXIT, SCORE_YEAR, SOUTH_EXIT } from './constants';
 import { dropCount, expReward, famExpNeed, gainExp, lvMult } from './level';
 import {
   addItem, assignHousing, attraction, bld, fighterStats, freeBeds, fx, guild, isNight, log, makeNpc,
-  maxHp, monsterStats, mods, newId, npcById, ofKind, randomLook, spawnNode, tod, year, freshName, type Stats,
+  maxHp, monsterStats, mods, newId, npcById, ofKind, spawnNode, tod, year, freshName, type Stats,
 } from './state';
 import { canForge, computeScore, earn, forgeUpgrade } from './econ';
+import { makeLook, randomJob } from './looks';
+import { currentBoss, eventsDaily, monsterMult, spendMult, touristMult } from './events';
+import { bondFight, checkTitles, emote, familyDaily, partnerOf } from './social';
+import { closeYear } from './report';
 import { chance, dist, pick, rand, randi, weighted } from './util';
 import { ROAD_SPEED, doorOf, findPath, isRoad, randomStreetTile, randomVillageTile, randomZoneTile, segmentAvoidsVillage, villageDist, zoneOf } from './world';
 import type { Building, Expedition, GameState, Goal, Monster, Npc, Profile } from './types';
 
+const JOB_NODE: Record<string, NodeKind> = { woodcutter: 'tree', miner: 'rock', forager: 'bush' };
 const SPEED = { fighter: 2.8, gatherer: 2.4, civilian: 1.5, tourist: 1.5 };
 const HUNGER_RATE = 100 / (6 * DAY);
 const MOOD_RATE = 100 / (6 * DAY);
 const MONSTER_INTERVAL = 1.2;
+const SHINY_RATE = 1 / 150;
 
 export function step(s: GameState, dt: number) {
   s.time += dt;
@@ -93,6 +99,7 @@ function gainNpcExp(s: GameState, n: Npc, amount: number) {
   const ups = gainExp(n, amount);
   if (!ups) return;
   fx(s, 'lvl', n.x, n.y, n.level);
+  emote(s, n, 'star');
   if (n.role === 'fighter') n.hp = maxHp(n);
   if (n.level % 10 === 0) log(s, 'log.npcLevel', { n: '@name:' + n.name, lv: n.level });
 }
@@ -176,7 +183,7 @@ function tryShop(s: GameState, n: Npc): boolean {
 }
 
 function duelRatio(st: Stats, hp: number, s: GameState, m: Monster): number {
-  const ms = monsterStats(s, m.type);
+  const ms = monsterStats(s, m.type, m);
   const fT = (m.hp / Math.max(1, st.atk - ms.def * 0.5)) * st.interval;
   const mT = (hp / Math.max(1, ms.atk - st.def * 0.5)) * MONSTER_INTERVAL;
   return mT / fT;
@@ -186,12 +193,18 @@ function pickTarget(s: GameState, n: Npc, st: Stats): Monster | null {
   const q = n.quest != null ? s.quests.find((q) => q.id === n.quest) : undefined;
   const targeted = new Map<number, number>();
   for (const o of s.npcs) if (o.role === 'fighter' && (o.state === 'hunt' || o.state === 'fight')) targeted.set(o.goalId, (targeted.get(o.goalId) ?? 0) + 1);
+  const boss = currentBoss(s);
+  if (boss && n.level >= (boss.lv ?? 1) * 0.5 && n.hp > st.maxHp * 0.7) return boss;
+  const mate = partnerOf(s, n);
+  const mateTarget = mate && (mate.state === 'hunt' || mate.state === 'fight') ? mate.goalId : -1;
   let best: Monster | null = null, bs = -Infinity;
   for (const m of s.monsters) {
+    if (m.boss != null) continue;
     const ratio = duelRatio(st, n.hp, s, m);
     const d = dist(n.x, n.y, m.x, m.y);
     let score: number;
     if (q && q.type === m.type && ratio > 0.8) score = 1e6 - d;
+    else if (m.id === mateTarget && ratio > 1) score = 1e5 - d;
     else if (ratio >= 1.6 && (targeted.get(m.id) ?? 0) < 2) score = expReward(s.mlv[m.type].level) / (25 + d);
     else continue;
     if (score > bs) { bs = score; best = m; }
@@ -232,7 +245,8 @@ function decideGatherer(s: GameState, n: Npc) {
   let best = null, bs = Infinity;
   for (const node of s.nodes) {
     if (taken.has(node.id)) continue;
-    const score = dist(n.x, n.y, node.x, node.y) + (s.items[NODE_ITEM[node.kind]] ?? 0) / 8;
+    const pref = JOB_NODE[n.job] === node.kind ? 0.5 : 1;
+    const score = (dist(n.x, n.y, node.x, node.y) + (s.items[NODE_ITEM[node.kind]] ?? 0) / 8) * pref;
     if (score < bs) { bs = score; best = node; }
   }
   if (best) return goTo(s, n, best.x, best.y, 'gatherNode', best.id);
@@ -306,6 +320,7 @@ function arrive(s: GameState, n: Npc) {
       n.money -= price;
       if (price > 0) earn(s, b, price);
       n.hunger = 100; n.mood = Math.min(100, n.mood + 5);
+      emote(s, n, 'food');
       return enter(n, b, 3);
     }
     case 'shop': {
@@ -327,6 +342,7 @@ function arrive(s: GameState, n: Npc) {
       const price = priceAt(b);
       if (n.money >= price) {
         n.money -= price; earn(s, b, price); n.mood = 100;
+        emote(s, n, 'note');
         if (b.type === 'arena' && n.role === 'fighter') gainNpcExp(s, n, expReward(n.level) * 2);
       }
       return enter(n, b, 5);
@@ -419,21 +435,55 @@ function fightTick(s: GameState, n: Npc, dt: number) {
   n.cd -= dt;
   if (n.cd > 0) return;
   n.cd = st.interval;
-  const dmg = hit(st.atk, monsterStats(s, m.type).def);
+  const dmg = hit(st.atk, monsterStats(s, m.type, m).def);
   m.hp -= dmg;
   fx(s, 'dmg', m.x, m.y, dmg);
+  if (n.cls === 'cleric') healAllies(s, n);
   if (m.target == null) m.target = n.id;
   if (m.hp <= 0) killMonster(s, m, n);
 }
 
+// clerics mend the most wounded fighter close by with every swing
+function healAllies(s: GameState, n: Npc) {
+  let best: Npc | undefined, worst = 0.9;
+  for (const o of s.npcs) {
+    if (o.role !== 'fighter' || o.state === 'down' || o.inside != null || dist(o.x, o.y, n.x, n.y) > 4) continue;
+    const f = o.hp / maxHp(o);
+    if (f < worst) { worst = f; best = o; }
+  }
+  if (best) best.hp = Math.min(maxHp(best), best.hp + maxHp(best) * 0.08);
+}
+
 function killMonster(s: GameState, m: Monster, killer: Npc) {
-  const L = s.mlv[m.type].level;
+  const L = m.lv ?? s.mlv[m.type].level;
   const parts = s.npcs.filter((o) => o.role === 'fighter' && (o.state === 'fight' || o.state === 'hunt') && o.goalId === m.id);
   if (!parts.includes(killer)) parts.push(killer);
-  for (const f of parts) { gainNpcExp(s, f, expReward(L)); f.state = 'idle'; f.kills++; }
+  const bonus = m.boss != null ? 5 : m.shiny ? 2 : 1;
+  const fam = MONSTERS[m.type].fam;
+  for (const f of parts) {
+    gainNpcExp(s, f, expReward(L) * bonus);
+    f.state = 'idle'; f.kills++; f.yk = (f.yk ?? 0) + 1;
+    (f.fk ??= {})[fam] = (f.fk[fam] ?? 0) + 1;
+    if (m.boss != null) { f.bosses = (f.bosses ?? 0) + 1; emote(s, f, 'win'); }
+    checkTitles(s, f);
+  }
+  bondFight(s, parts);
+  s.ys.kills++;
   const avg = parts.reduce((a, f) => a + f.level, 0) / parts.length;
   gainMonsterExp(s, m.type, expReward(avg) * 0.05);
-  const count = Math.max(1, Math.round(dropCount(L) * mods(s).drops));
+  if (m.boss != null) {
+    const reward = 300 * L;
+    for (const f of parts) f.money += Math.round(reward / parts.length);
+    s.money += 50 * L;
+    s.ys.bosses++;
+    log(s, 'log.bossDown', { t: `@boss.${m.boss}`, m: '@m.' + m.type, n: parts.length, r: reward });
+  }
+  if (m.shiny) {
+    if (!s.shinySeen.includes(m.type)) s.shinySeen.push(m.type);
+    s.ys.shinies++;
+    log(s, 'log.shiny', { n: '@name:' + killer.name, m: '@m.' + m.type });
+  }
+  const count = Math.max(1, Math.round(dropCount(L) * mods(s).drops * (m.boss != null ? 10 : m.shiny ? 3 : 1)));
   const drops = MONSTERS[m.type].drops;
   for (let i = 0; i < count; i++) {
     const item = weighted(drops, (d) => d[1])![0];
@@ -441,6 +491,7 @@ function killMonster(s: GameState, m: Monster, killer: Npc) {
     f.bag[item] = (f.bag[item] ?? 0) + 1;
     if (!s.disc.includes(item)) s.disc.push(item);
   }
+  if (m.boss != null) for (const it of ['soulGem', 'gem', 'mithril']) { const f = pick(parts); f.bag[it] = (f.bag[it] ?? 0) + 1 + Math.floor(L / 40); if (!s.disc.includes(it)) s.disc.push(it); }
   fx(s, 'item', m.x, m.y, count);
   if (!s.seen.includes(m.type)) s.seen.push(m.type);
   for (const q of s.quests) {
@@ -454,9 +505,12 @@ function killMonster(s: GameState, m: Monster, killer: Npc) {
 }
 
 function downFighter(s: GameState, f: Npc, m: Monster) {
-  const L = s.mlv[m.type].level;
+  const L = m.lv ?? s.mlv[m.type].level;
   f.hp = 0; f.state = 'down'; f.downT = s.time; f.path = []; f.rescuer = null; f.goal = null;
-  gainMonsterExp(s, m.type, expReward(f.level));
+  f.downs = (f.downs ?? 0) + 1;
+  emote(s, f, 'hurt');
+  checkTitles(s, f);
+  if (m.boss == null) gainMonsterExp(s, m.type, expReward(f.level));
   gainNpcExp(s, f, expReward(L) * 0.05);
   m.target = null;
   log(s, 'log.down', { n: '@name:' + f.name, m: '@m.' + m.type, lv: L });
@@ -499,7 +553,7 @@ function updateMonster(s: GameState, m: Monster, dt: number) {
       m.cd -= dt;
       if (m.cd <= 0) {
         m.cd = MONSTER_INTERVAL;
-        const dmg = hit(monsterStats(s, m.type).atk, fighterStats(s, f).def);
+        const dmg = hit(monsterStats(s, m.type, m).atk, fighterStats(s, f).def);
         f.hp -= dmg;
         fx(s, 'dmg', f.x, f.y, dmg);
         if (f.hp <= 0) downFighter(s, f, m);
@@ -523,20 +577,24 @@ function updateMonster(s: GameState, m: Monster, dt: number) {
 }
 
 export const zoneCap = (s: GameState, z: number) =>
-  Math.min(30, Math.round(([6, 4, 3][z] + (year(s) - 1) * [1, 0.8, 0.6][z]) * mods(s).monsterRate));
+  Math.min(40, Math.round(([6, 4, 3][z] + (year(s) - 1) * [1, 0.8, 0.6][z]) * mods(s).monsterRate * monsterMult(s)));
 export const monsterCap = (s: GameState) => [0, 1, 2].reduce((a, z) => a + zoneCap(s, z), 0);
 
 // per-zone caps keep weak monsters respawning even when strong ones linger
 function spawnMonster(s: GameState) {
-  const open = [0, 1, 2].filter((z) => s.monsters.filter((m) => m.zone === z).length < zoneCap(s, z));
+  const open = [0, 1, 2].filter((z) => s.monsters.filter((m) => m.zone === z && m.boss == null).length < zoneCap(s, z));
   if (!open.length) return;
   const zone = pick(open);
-  const type = pick(ZONE_MONSTERS[zone]);
+  const list = zoneMonsters(zone, villageDef(s.village).ground);
+  if (!list.length) return;
+  const type = weighted(list, (k) => spawnWeight(MONSTERS[k]))!;
   const p = randomZoneTile(zone);
   s.monsters.push({
-    id: newId(s), type, x: p.x + 0.5, y: p.y + 0.5, hp: monsterStats(s, type).maxHp,
+    id: newId(s), type, x: p.x + 0.5, y: p.y + 0.5, hp: 0, shiny: chance(SHINY_RATE),
     tx: p.x + 0.5, ty: p.y + 0.5, target: null, cd: 0, facing: 1, zone, wait: rand(0, 3),
   });
+  const m = s.monsters[s.monsters.length - 1];
+  m.hp = monsterStats(s, type, m).maxHp;
 }
 
 // ---------- gathering & rescue ----------
@@ -597,6 +655,7 @@ function dropOff(s: GameState, g: Npc, b: Building | undefined) {
   if (BUILDINGS[b.type].kind === 'clinic') payClinic(s, f, b);
   f.hp = Math.max(f.hp, 1);
   enter(f, b, 0, 'rest');
+  s.stats.rescues++;
   log(s, 'log.rescued', { g: '@name:' + g.name, n: '@name:' + f.name, b: '@b.' + b.type });
 }
 
@@ -633,7 +692,7 @@ function gift(s: GameState, p: Profile, L: number) {
 
 function visit(s: GameState, n: Npc, b: Building) {
   const def = BUILDINGS[b.type];
-  const price = priceAt(b) * (n.role === 'tourist' ? mods(s).touristSpend : 1);
+  const price = priceAt(b) * (n.role === 'tourist' ? mods(s).touristSpend : 1) * spendMult(s);
   const sat = lvMult(b.level);
   if (price > 0 && n.money >= price) {
     n.money -= price;
@@ -659,16 +718,20 @@ function touristSpawn(s: GameState, dt: number) {
   if (isNight(s) || tod(s) > 0.6) return;
   const visiting = new Set(s.npcs.filter((n) => n.role === 'tourist').map((n) => n.profile));
   if (visiting.size >= 30) return;
-  const perDay = Math.min(10, 0.3 + Math.sqrt(attraction(s)) / 2) * mods(s).touristRate;
+  const perDay = Math.min(10, 0.3 + Math.sqrt(attraction(s)) / 2) * mods(s).touristRate * touristMult(s);
   if (!chance((perDay * dt) / (DAY * 0.56))) return;
   let idx = -1;
   const returning = s.profiles.map((_, i) => i).filter((i) => !visiting.has(i));
   const wantNew = s.profiles.length < 12 || (s.profiles.length < 40 + year(s) * 5 && chance(0.3));
   if (returning.length && !wantNew) idx = pick(returning);
-  else { s.profiles.push({ name: freshName(s), look: randomLook(), level: 1, exp: 0, visits: 0 }); idx = s.profiles.length - 1; }
+  else {
+    const job = randomJob('tourist');
+    s.profiles.push({ name: freshName(s), job, look: makeLook('tourist', 'warrior', job), level: 1, exp: 0, visits: 0 });
+    idx = s.profiles.length - 1;
+  }
   const p = s.profiles[idx];
   const n = makeNpc(s, 'tourist', SOUTH_EXIT.x, SOUTH_EXIT.y);
-  n.profile = idx; n.name = p.name; n.look = p.look;
+  n.profile = idx; n.name = p.name; n.look = p.look; n.job = p.job;
   n.money = Math.round(rand(40, 100) * (1 + 0.1 * Math.sqrt(p.level - 1)));
   const pool = s.buildings.filter((b) => visitable(b, true));
   const k = randi(2, 4);
@@ -679,11 +742,16 @@ function touristSpawn(s: GameState, dt: number) {
   }
   s.npcs.push(n);
   s.stats.tourists++;
+  s.ys.tourists++;
 }
 
 // ---------- daily / quests / arrivals ----------
 
 function daily(s: GameState) {
+  if (s.day % DAYS_PER_YEAR === 0 && s.day > 0) closeYear(s);
+  eventsDaily(s);
+  familyDaily(s);
+  for (const n of s.npcs) if (n.role === 'fighter') checkTitles(s, n);
   assignHousing(s);
   arrivals(s);
   questsDaily(s);
@@ -768,6 +836,8 @@ function completeQuest(s: GameState, id: number) {
   const g = guild(s);
   earn(s, g, q.reward * 0.1);
   log(s, 'log.questDone', { m: '@m.' + q.type, r: q.reward });
+  s.stats.quests++;
+  s.ys.quests++;
   s.quests = s.quests.filter((o) => o !== q);
 }
 
@@ -806,6 +876,10 @@ function expeditionTick(s: GameState) {
       n.hp = Math.max(n.hp, 1);
       goBuilding(s, n, guild(s), 'deposit');
     }
+    s.stats.expeditions++;
+    s.ys.expeditions++;
+    for (const n of ms) { n.exps = (n.exps ?? 0) + 1; checkTitles(s, n); }
+    if (!s.stats.expLocs.includes(e.loc)) s.stats.expLocs.push(e.loc);
     log(s, 'log.expReturn', { loc: '@ex.' + e.loc, w: e.wins, l: e.losses, c: items.reduce((a, [, c]) => a + c, 0) });
     s.exp = null;
   }
