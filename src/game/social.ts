@@ -1,5 +1,5 @@
-import { DAYS_PER_YEAR, HOUSE_CAP, SOUTH_EXIT } from './constants';
-import { bio, bld, fx, housed, log, makeNpc, npcById } from './state';
+import { DAYS_PER_YEAR, HOUSE_CAP, PROMOTE_LEVEL, SOUTH_EXIT } from './constants';
+import { bio, bld, fx, housed, log, makeNpc, note, npcById } from './state';
 import { chance } from './util';
 import type { GameState, Npc } from './types';
 
@@ -49,6 +49,18 @@ export function checkTitles(s: GameState, n: Npc) {
     bio(s, n, 'bio.title', { t: `@title.${k}` });
     log(s, 'log.title', { n: '@name:' + n.name, t: `@title.${k}` });
   }
+}
+
+// reaching Lv.100 earns an advanced class, a cape and a small lasting boost
+export function checkPromotion(s: GameState, n: Npc) {
+  if (n.role !== 'fighter' || n.promoted || n.level < PROMOTE_LEVEL) return;
+  n.promoted = true;
+  n.look = { ...n.look, cape: true };
+  emote(s, n, 'star');
+  const p = { n: '@name:' + n.name, a: '@cls.' + n.cls, b: '@cls2.' + n.cls };
+  bio(s, n, 'bio.promoted', { b: '@cls2.' + n.cls });
+  log(s, 'log.promoted', p);
+  note(s, 'log.promoted', p);
 }
 
 const pairKey = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`);

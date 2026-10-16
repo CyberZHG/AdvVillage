@@ -6,6 +6,7 @@ import { baseRoads, inVillage, isRoad, randomZoneTile, syncBounds, syncRoads, vi
 import { makeLook, randomJob } from './looks';
 import { comboAppeal } from './combos';
 import { titleBonus } from './social';
+import { rbonus } from './research';
 import type { Building, Cls, GameState, LogParam, Monster, Npc, ResNode, Role } from './types';
 
 export const NAME_POOL = 128;
@@ -85,9 +86,11 @@ export function maxHp(s: GameState, n: Npc): number {
   let hp = c.hp + c.hpG * n.level;
   hp += (equipByKey(n.armor)?.hp ?? 0) * forged(s, n.armor);
   hp += (equipByKey(n.accessory)?.hp ?? 0) * forged(s, n.accessory);
-  hp *= titleBonus(n).hp;
+  hp *= titleBonus(n).hp * (n.promoted ? PROMOTE_BONUS : 1);
   return Math.round(hp);
 }
+
+export const PROMOTE_BONUS = 1.1;
 
 export interface Stats { maxHp: number; atk: number; def: number; range: number; interval: number }
 
@@ -102,6 +105,7 @@ export function fighterStats(s: GameState, n: Npc): Stats {
   if (n.hunger < 20) m *= 0.75;
   if (n.mood > 70) m *= 1.05;
   if (rivalNear(s, n)) m *= 1.1;
+  m *= (1 + rbonus(s, 'tactics')) * (n.promoted ? PROMOTE_BONUS : 1);
   const tb = titleBonus(n);
   return { maxHp: maxHp(s, n), atk: atk * m * tb.atk, def: def * m * tb.def, range: c.range, interval: c.interval };
 }
@@ -174,6 +178,7 @@ export function newGame(village: string): GameState {
     comboSeen: [], weather: 'clear', effects: [], bonds: {}, couples: [], reports: [], ys: emptyYear(), shinySeen: [],
     merchant: null, nextBoss: 40, fx: [],
     fame: 0, commissions: [], cseason: -1, rivals: [], nextVip: 45, vips: [], notes: [],
+    research: {}, researching: null, depth: {}, pets: [], cat: null, hist: [], histBase: { e: 0, t: 0, k: 0 },
   };
   const m = villageMods(village);
   for (const [k, d] of Object.entries(MONSTERS)) s.mlv[k] = { level: d.base + m.monsterLevel, exp: 0 };

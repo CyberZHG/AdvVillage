@@ -13,12 +13,17 @@ import { download, makeReportImage, makeShareImage, shareImage, toBlob } from '.
 import { buyOffer, currentBoss } from './game/events';
 import { build, canBuild, demolish, expand, forgeUpgrade, launchExpedition, placeRoad, removeRoad, upgrade } from './game/econ';
 import { bld } from './game/state';
-import { setForgeSlot } from './ui/ui';
+import { offlineHtml, setChartKind, setForgeSlot } from './ui/ui';
+import { startResearch } from './game/research';
+import { petCat } from './game/cat';
+import { releasePet } from './game/pets';
+import { settleOffline } from './game/offline';
 import {
   confirmHtml, importModalHtml, mountHud, reportHtml, shareModalHtml, pendingDemolish, resetHtmlCache, scoreModalHtml, setBuildCat, setPendingDemolish, titleHtml, updateHud,
   type Ctl, type Tab,
 } from './ui/ui';
 import type { GameState } from './game/types';
+import type { Sel } from './render/renderer';
 import { blockZoom, registerSW } from './pwa';
 
 const $ = (id: string) => document.getElementById(id)!;
@@ -70,6 +75,7 @@ function showTitle() {
 
 function startGame(village: string, fresh: boolean) {
   s = (!fresh && loadGame(village)) || newGame(village);
+  const away = fresh ? null : settleOffline(s);
   saveGame(s);
   $('title').classList.add('hidden');
   $('hud').classList.remove('hidden');
@@ -80,6 +86,7 @@ function startGame(village: string, fresh: boolean) {
   last = performance.now();
   achievements();
   refresh();
+  if (away) showModal(offlineHtml(away));
 }
 
 function achievements() {
@@ -129,7 +136,7 @@ function onScored() {
 
 function act(a: string) {
   const [cmd, x, y] = a.split(':');
-  if (cmd !== 'demolish') setPendingDemolish(null);
+  if (cmd !== 'demolish' && cmd !== 'release') setPendingDemolish(null);
   switch (cmd) {
     case 'tab': tab = tab === x ? null : (x as Tab); break;
     case 'close': tab = null; break;
@@ -145,7 +152,9 @@ function act(a: string) {
     case 'focus': renderer.focusFighters = !renderer.focusFighters; break;
     case 'cat': setBuildCat(x); break;
     case 'select': {
-      renderer.selected = { kind: x as 'npc' | 'bld' | 'mon', id: Number(y) };
+      renderer.selected = { kind: x as NonNullable<Sel>['kind'], id: Number(y) };
+      if (x === 'cat' && s!.cat) renderer.centerOn(s!.cat.x, s!.cat.y);
+      if (x === 'pet') { const p = s!.pets.find((o) => o.id === Number(y)); if (p) renderer.centerOn(p.x, p.y); }
       const id = Number(y);
       if (x === 'bld') { const b = bld(s!, id); if (b) renderer.centerOn(b.x + 1, b.y + 1); }
       if (x === 'npc') { const n = s!.npcs.find((o) => o.id === id); if (n && n.inside == null && n.state !== 'away') renderer.centerOn(n.x, n.y); }
@@ -164,6 +173,15 @@ function act(a: string) {
     }
     case 'forge': if (!forgeUpgrade(s!, x, 'village')) toast(t('ui.notEnough')); break;
     case 'forgeSlot': setForgeSlot(x); break;
+    case 'research': if (!startResearch(s!, x)) toast(t('ui.notEnough')); break;
+    case 'chart': setChartKind(x); break;
+    case 'petCat': petCat(s!); break;
+    case 'release': {
+      const id = Number(x);
+      if (pendingDemolish === -id) { releasePet(s!, id); renderer.selected = null; setPendingDemolish(null); }
+      else setPendingDemolish(-id);
+      break;
+    }
     case 'follow': {
       const id = Number(x);
       renderer.follow = renderer.follow === id ? null : id;
@@ -288,6 +306,8 @@ canvas.addEventListener('pointerup', (e) => {
     } else toast(canBuild(s, type) ? t('ui.cantPlace') : t('ui.notEnough'));
   } else {
     renderer.selected = renderer.pick(e.clientX, e.clientY, s);
+    // tapping the cat pets it
+    if (renderer.selected?.kind === 'cat' && petCat(s)) toast(t('ui.catPurr'));
   }
   refresh();
 });

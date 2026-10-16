@@ -53,6 +53,9 @@ export function draw(ctx: CanvasRenderingContext2D, s: Sprite, px: number, py: n
 export const tileSprite = (g: Ground, kind: TileKind, v: number) => get(`tile/${g}/${kind}/${v % 6}`);
 export const buildingSprite = (type: string, flip = false) => get(`bld/${type}`, flip);
 export const nodeSprite = (kind: NodeKind, v: number, g: Ground) => get(`node/${kind}/${v % (kind === 'tree' ? 4 : 2)}/${g}`);
+export const catSprite = (frame: string, flip: boolean) => get(`cat/${frame}`, flip);
+export const catNeck = (frame: string): [number, number] => (frames[`cat/${frame}`] as Frame & { neck?: [number, number] })?.neck ?? [8, 9];
+export const catIcon = () => iconOf('cat/sit0');
 export const monsterSprite = (type: string, frame: number, flip: boolean) => get(`m/${type}/${frame}`, flip);
 
 let sheetPixels: Uint8ClampedArray | null = null;
@@ -76,7 +79,7 @@ function layer(name: string): Layer | null {
 
 const humanCache = new Map<string, Sprite>();
 const lookKey = (l: Look, frame: number) =>
-  `${l.skin},${l.hair},${l.style},${l.cloth},${l.cloth2},${l.pants},${l.outfit},${l.head},${l.beard},${l.item},${frame}`;
+  `${l.skin},${l.hair},${l.style},${l.cloth},${l.cloth2},${l.pants},${l.outfit},${l.head},${l.beard},${l.item},${l.cape ? 1 : 0},${frame}`;
 
 function humanCanvas(look: Look, frame: number): HTMLCanvasElement {
   const layers = layerNames(look, frame).map(layer).filter((l): l is Layer => !!l);

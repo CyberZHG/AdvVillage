@@ -17,19 +17,24 @@ import { ACHIEVEMENTS } from '../game/achievements';
 import { COMBOS, COMBO_RADIUS, activeCombos, combosOf, decorBonus } from '../game/combos';
 import { SEASONS, currentBoss, festival, season } from '../game/events';
 import { titleBonus } from '../game/social';
-import { buildingIcon, humanIcon, itemIcon, monsterIcon } from '../render/art';
-import { CLASS_COLOR } from '../render/renderer';
+import { buildingIcon, catIcon, humanIcon, itemIcon, monsterIcon } from '../render/art';
+import { CLASS_COLOR, type Sel } from '../render/renderer';
+import { RESEARCH, canResearch, researchCost, rlv } from '../game/research';
+import { CAT_MAX, CAT_PERKS, catNeed } from '../game/cat';
+import { PET_BONUS, petCap, petRole } from '../game/pets';
+import { SEASON_HOT, hotNow } from '../game/events';
+import type { OfflineReport } from '../game/offline';
 import type { Building, GameState, Npc } from '../game/types';
 import type { Meta } from '../game/save';
 
-export type Tab = 'build' | 'facilities' | 'residents' | 'guild' | 'bestiary' | 'achievements' | 'forge' | 'storage' | 'tourists' | 'village' | 'settings';
+export type Tab = 'build' | 'facilities' | 'residents' | 'guild' | 'bestiary' | 'achievements' | 'forge' | 'research' | 'storage' | 'tourists' | 'village' | 'settings';
 
 export interface Ctl {
   s: GameState;
   meta: Meta;
   speed: number;
   placing: string | null;
-  selected: { kind: 'npc' | 'bld' | 'mon'; id: number } | null;
+  selected: Sel;
   labels: boolean;
   focus: boolean;
   follow: number | null;
@@ -67,7 +72,7 @@ function statusKey(n: Npc): string {
 export const nameOf = (n: Npc) => (n.title ? t('ui.titled', { n: npcName(n.name), t: `@title.${n.title}` }) : npcName(n.name));
 const SEASON_ICON = ['🌸', '☀️', '🍂', '❄️'];
 const WEATHER_ICON: Record<string, string> = { clear: '', rain: '☔', snow: '🌨', storm: '⛈' };
-const roleLabel = (n: Npc) => (n.role === 'fighter' ? t('cls.' + n.cls) : n.job ? t('job.' + n.job) : t('role.' + n.role));
+const roleLabel = (n: Npc) => (n.role === 'fighter' ? t((n.promoted ? 'cls2.' : 'cls.') + n.cls) : n.job ? t('job.' + n.job) : t('role.' + n.role));
 
 // ---------------- skeleton ----------------
 
@@ -86,7 +91,7 @@ export function mountHud() {
     <div id="toolbar"></div>`;
 }
 
-const TABS: Tab[] = ['build', 'facilities', 'residents', 'guild', 'bestiary', 'achievements', 'forge', 'storage', 'tourists', 'village', 'settings'];
+const TABS: Tab[] = ['build', 'facilities', 'residents', 'guild', 'bestiary', 'achievements', 'forge', 'research', 'storage', 'tourists', 'village', 'settings'];
 
 let lastHtml: Record<string, string> = {};
 function setHtml(id: string, html: string) {
@@ -152,7 +157,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       const ok = canBuild(s, k);
       return `<div class="card ${ok ? '' : 'dim'}">
         <div class="card-img">${img(buildingIcon(k), 'bimg')}</div>
-        <div class="card-main"><b>${t('b.' + k)}</b> <small>${t('ui.owned', { n: built })}</small>
+        <div class="card-main"><b>${t('b.' + k)}</b> <small>${t('ui.owned', { n: built })}</small>${hotNow(s, k) ? ` <span class="tag good">${t('ui.hot')}</span>` : ''}
         <div class="desc">${t('bd.' + k)}</div>${comboTags(s, k)}${goodsTags(s, k)}
         <div>${done ? t('ui.uniqueBuilt') : costHtml(s, buildCost(s, k))}</div>
         <div class="meta">${t('ui.size', { n: d.size })} · ${t('ui.attraction')} ${d.attraction}${d.price ? ` · ${t('ui.price')} ${d.price}` : ''}${hoursText(k)}</div></div>
@@ -187,7 +192,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     const list = residents(s).sort((a, b) => order[a.role] - order[b.role] || b.level - a.level);
     const counts = (['fighter', 'gatherer', 'civilian'] as const).map((r) => `${t('role.' + r)} ${list.filter((n) => n.role === r).length}`).join(' · ');
     const legend = CLASS_KEYS.map((k) => `<span class="tag"><span class="dot" style="background:${CLASS_COLOR[k]}"></span>${t('cls.' + k)}</span>`).join('');
-    return `<p class="meta">${counts}</p><div class="tags">${legend}</div><p class="meta">${t('ui.ringHint')}</p>` + list.map((n) => `
+    return companionsHtml(s) + `<p class="meta">${counts}</p><div class="tags">${legend}</div><p class="meta">${t('ui.ringHint')}</p>` + list.map((n) => `
       <div class="row click" data-act="select:npc:${n.id}">${img(humanIcon(n.role, n.cls, n.look), 'pimg')}
         <span class="grow"><b>${esc(nameOf(n))}</b> <small>${roleLabel(n)}</small> ${n.role !== 'civilian' ? t('ui.lv', { lv: n.level }) : ''}
         <br><small>${t(statusKey(n))}${debuffs(n).map((d) => ` <span class="bad">${t('debuff.' + d)}</span>`).join('')}</small></span>
@@ -232,8 +237,9 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
         : `<span class="tag">${t('ui.unknown')}</span>`).join('');
       const drops = [...new Set(d.monsters.flatMap((m) => MONSTERS[m].drops.map((x) => x[0])))].map((it) => s.disc.includes(it)
         ? `<span class="tag">${img(itemIcon(it))}${t('item.' + it)}</span>` : `<span class="tag">${t('ui.unknown')}</span>`).join('');
-      return `<div class="card ${locked ? 'dim' : ''}"><div class="card-main"><b>${t('ex.' + d.key)}</b> <small>${t('ui.days', { n: d.days })}</small>
-        <div class="desc">${t('exd.' + d.key)}</div>
+      const depth = s.depth[d.key] ?? 0;
+      return `<div class="card ${locked ? 'dim' : ''}"><div class="card-main"><b>${t('ex.' + d.key)}</b> <small>${t('ui.days', { n: d.days })}</small>${depth ? ` <span class="tag">${t('ui.depth', { d: depth + 1 })}</span>` : ''}
+        <div class="desc">${t('exd.' + d.key)}</div>${depth ? `<div class="meta">${t('ui.depthHint', { l: depth * 4, p: depth * 15 })}</div>` : ''}
         <div>${t('ui.monsters')}: ${mons}</div><div>${t('ui.drops')}: ${drops}</div>
         ${locked ? `<div class="meta">${t('ui.unlockYear', { y: d.unlockYear })}</div>` : ''}</div>
         ${locked ? '' : btn('expedition:' + d.key, t('ui.recruit'), { disabled: !!s.exp })}</div>`;
@@ -293,6 +299,22 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       }).join('') || `<p class="meta">${t('ui.forgeNone')}</p>`);
   },
 
+  research(c) {
+    const s = c.s;
+    let h = `<p class="meta">${t('ui.researchHint')}</p>`;
+    const r = s.researching;
+    if (r) h += `<div class="box"><b>${t('rs.' + r.k)}</b> ${t('ui.lv', { lv: rlv(s, r.k) + 1 })} — ${t('ui.researching')} (${t('ui.daysLeft', { n: Math.max(0, Math.ceil((r.until - s.time) / DAY)) })})</div>`;
+    return h + RESEARCH.map((d) => {
+      const L = rlv(s, d.key), max = L >= d.max;
+      const rc = researchCost(s, d.key), have = s.items[rc.mat] ?? 0;
+      const eff = t('rse.' + d.key, { p: Math.round(d.per * 100 * L * 10) / 10, n: Math.round(d.per * 100 * (L + 1) * 10) / 10 });
+      return `<div class="row ${r?.k === d.key ? 'on' : ''}"><span class="grow"><b>${t('rs.' + d.key)}</b> ${t('ui.lv', { lv: L })}/${d.max}
+        <br><small>${eff}</small>
+        ${max ? '' : `<br>${money(rc.money, s.money >= rc.money)} <span class="cost ${have >= rc.count ? '' : 'bad'}">${img(itemIcon(rc.mat))}${s.disc.includes(rc.mat) ? t('item.' + rc.mat) : t('ui.unknown')} ${fmt(have)}/${fmt(rc.count)}</span> <small>${t('ui.days', { n: rc.days })}</small>`}</span>
+        ${max ? `<small>${t('ui.maxed')}</small>` : btn('research:' + d.key, t('ui.research'), { disabled: !canResearch(s, d.key) })}</div>`;
+    }).join('');
+  },
+
   storage(c) {
     const s = c.s;
     return `<div class="items">${Object.keys(ITEMS).map((k) => s.disc.includes(k)
@@ -325,7 +347,9 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     const fest = festival(s);
     const effects = s.effects.filter((e) => e.until > s.time).map((e) => `<span class="tag">${t('eff.' + e.k)}</span>`).join('');
     h += `<div class="kv"><span>${t('ui.season')}</span><b>${SEASON_ICON[season(s)]} ${t('season.' + SEASONS[season(s)])}${fest ? ` · <span class="fest">${t('fest.' + fest)}</span>` : ''}</b>
-      <span>${t('ui.weather')}</span><b>${WEATHER_ICON[s.weather] ?? ''} ${t('weather.' + s.weather)}</b>${effects ? `<span>${t('ui.effects')}</span><b>${effects}</b>` : ''}</div>`;
+      <span>${t('ui.weather')}</span><b>${WEATHER_ICON[s.weather] ?? ''} ${t('weather.' + s.weather)}</b>${effects ? `<span>${t('ui.effects')}</span><b>${effects}</b>` : ''}
+      <span>${t('ui.hotNow')}</span><b>${SEASON_HOT[season(s)].map((k) => `<span class="tag good">${t('b.' + k)}</span>`).join('')}</b></div>`;
+    h += chartHtml(s);
     h += `<h3>${t('ui.reports')}</h3>`;
     h += s.reports.length ? `<div class="btns">${[...s.reports].reverse().map((r, i) => btn('report:' + (s.reports.length - 1 - i), t('ui.reportBtn', { y: r.year }))).join('')}</div>` : `<p class="meta">${t('ui.noReports')}</p>`;
     h += `<h3>${t('ui.expand')}</h3>`;
@@ -380,6 +404,16 @@ function infoCard(c: Ctl): string {
       <div class="kv"><span>HP</span><b>${fmt(Math.max(0, m.hp))}/${fmt(st.maxHp)}</b><span>${t('ui.atk')}</span><b>${fmt(st.atk)}</b><span>${t('ui.def')}</span><b>${fmt(st.def)}</b></div>
       <div>${t('ui.drops')}: ${drops}</div><p class="meta">${t('ui.sharedLevel')}</p></div>`;
   }
+  if (sel.kind === 'cat') return catCard(c);
+  if (sel.kind === 'pet') {
+    const p = s.pets.find((o) => o.id === sel.id);
+    if (!p) return '';
+    const role = petRole(p.type)!;
+    return head(img(monsterIcon(p.type), 'mimg'), t('m.' + p.type), t('pet.' + role)) + `<div class="win-body">
+      <div class="desc">${t('petd.' + role, { p: Math.round(PET_BONUS[role] * 100) })}</div>
+      <p class="meta">${t('ui.petSince', { d: dayText(p.since) })}</p>
+      <div class="btns right">${btn('release:' + p.id, pendingDemolish === -p.id ? t('ui.confirmRelease') : t('ui.release'), { cls: 'danger' })}</div></div>`;
+  }
   const n = npcById(s, sel.id);
   if (!n) return '';
   let body = `<div class="kv"><span>${t('ui.status')}</span><b>${t(statusKey(n))}</b>`;
@@ -429,7 +463,7 @@ function infoCard(c: Ctl): string {
 function buildingBody(c: Ctl, b: Building): string {
   const s = c.s;
   const d = BUILDINGS[b.type];
-  let h = `<div class="desc">${t('bd.' + b.type)}</div>`;
+  let h = `<div class="desc">${t('bd.' + b.type)}</div>${hotNow(s, b.type) ? `<p class="good">${t('ui.hotDesc')}</p>` : ''}`;
   h += `<div class="kv"><span>${t('ui.exp')}</span><b>${bar(b.exp / bldExpNeed(b.level))}</b>
     <span>${t('ui.attraction')}</span><b>${(d.attraction * lvMult(b.level)).toFixed(1)}</b>`;
   if (d.price > 0) h += `<span>${t('ui.price')}</span><b>${fmt(d.price * lvMult(b.level))}</b>`;
@@ -457,7 +491,7 @@ function buildingBody(c: Ctl, b: Building): string {
   }
   if (d.kind === 'guild') h += `<div class="btns">${btn('tab:guild', t('tab.guild'))}</div>`;
   if (d.kind === 'forge') h += `<div class="btns">${btn('tab:forge', t('tab.forge'))}</div>`;
-  const uc = upgradeCost(b);
+  const uc = upgradeCost(s, b);
   h += `<div class="row"><span class="grow">${t('ui.upgradeTo', { lv: b.level + 1 })}<br>${costHtml(s, uc)}</span>${btn('upgrade:' + b.id, t('ui.upgrade'), { disabled: !hasCost(s, uc) })}</div>`;
   if (b.type !== 'guild') h += `<div class="btns right">${btn('demolish:' + b.id, pendingDemolish === b.id ? t('ui.confirmDemolish') : t('ui.demolish'), { cls: 'danger' })}</div>`;
   return `<div class="win-body">${h}</div>`;
@@ -584,4 +618,53 @@ function fameHtml(s: GameState): string {
     <span>${t('ui.fame')}</span><b>${fmt(s.fame)}${next ? ` / ${fmt(next)}` : ''}<br>${bar(f, 'fam')}</b>
     <span>${t('ui.famePerk')}</span><b>${t('ui.famePerkText', { p: Math.round(6 * r) })}</b></div>
     <p class="meta">${t('ui.fameHint')}</p><div class="tags">${vips}</div>${effectTag(s, 'sage')}${effectTag(s, 'smith')}`;
+}
+
+const dayText = (d: number) => t('ui.dayShort', { y: Math.floor(d / DAYS_PER_YEAR) + 1, m: Math.floor((d % DAYS_PER_YEAR) / DAYS_PER_MONTH) + 1 });
+
+function companionsHtml(s: GameState): string {
+  let h = `<h3>${t('ui.companions')}</h3>`;
+  if (s.cat) h += `<div class="row click" data-act="select:cat:0">${img(catIcon(), 'mimg')}<span class="grow"><b>${t('cat.name')}</b> ${t('ui.catLv', { lv: s.cat.lv })}
+    <br>${bar(s.cat.lv >= CAT_MAX ? 1 : s.cat.exp / catNeed(s.cat.lv), 'fam')} <small>${t('cata.' + s.cat.act)}</small></span></div>`;
+  h += s.pets.map((p) => `<div class="row click" data-act="select:pet:${p.id}">${img(monsterIcon(p.type), 'mimg')}<span class="grow"><b>${t('m.' + p.type)}</b>
+    <br><small>${t('pet.' + petRole(p.type))}</small></span></div>`).join('');
+  return h + `<p class="meta">${t('ui.petHint', { n: s.pets.length, c: petCap(s) })}</p><h3>${t('tab.residents')}</h3>`;
+}
+
+function catCard(c: Ctl): string {
+  const s = c.s, cat = s.cat;
+  if (!cat) return '';
+  const perks = CAT_PERKS.map(([k, lv]) => `<li class="${cat.lv >= lv ? 'good' : 'dim'}">${t('ui.catLv', { lv })} · ${t('catp.' + k, { p: cat.lv })}</li>`).join('');
+  const ready = s.time - cat.petT >= 3;
+  return `<div class="win-title">${img(catIcon(), 'mimg')}<span class="grow"><b>${t('cat.name')}</b> <small>${t('ui.catLv', { lv: cat.lv })}</small></span>${btn('deselect', '✕', { cls: 'x' })}</div>
+    <div class="win-body"><div class="kv"><span>${t('ui.status')}</span><b>${t('cata.' + cat.act)}</b>
+    <span>${t('ui.affection')}</span><b>${bar(cat.lv >= CAT_MAX ? 1 : cat.exp / catNeed(cat.lv), 'fam')}</b>
+    <span>${t('ui.catSince')}</span><b>${dayText(cat.since)}</b></div>
+    <div class="btns">${btn('petCat', t('ui.petCat'), { cls: 'primary', disabled: !ready })}</div>
+    <p class="meta">${t('ui.catHint')}</p><ul class="bio">${perks}</ul></div>`;
+}
+
+let chartKind: 'e' | 't' | 'k' = 'e';
+export const setChartKind = (k: string) => { chartKind = k as typeof chartKind; };
+
+// last four years of monthly figures as a bar chart
+function chartHtml(s: GameState): string {
+  const data = s.hist.slice(-48).map((m) => m[chartKind]);
+  const tabs = (['e', 't', 'k'] as const).map((k) => btn('chart:' + k, t('chart.' + k), { cls: chartKind === k ? 'on' : '' })).join('');
+  if (!data.length) return `<h3>${t('ui.stats')}</h3><p class="meta">${t('ui.statsEmpty')}</p>`;
+  const max = Math.max(1, ...data), W = 240, H = 70, bw = W / 48;
+  const bars = data.map((v, i) => `<rect x="${(i + 48 - data.length) * bw + 0.5}" y="${H - (v / max) * H}" width="${bw - 1}" height="${(v / max) * H}" />`).join('');
+  return `<h3>${t('ui.stats')}</h3><div class="btns">${tabs}</div>
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">${bars}</svg>
+    <p class="meta">${t('ui.statsHint', { max: fmt(max), last: fmt(data[data.length - 1]) })}</p>`;
+}
+
+export function offlineHtml(r: OfflineReport): string {
+  const h = Math.floor(r.sec / 3600), m = Math.floor((r.sec % 3600) / 60);
+  const items = r.items.slice(0, 8).map(([k, v]) => `<span class="tag">${img(itemIcon(k))}${t('item.' + k)} ×${fmt(v)}</span>`).join('');
+  return `<div class="win modal-box"><div class="win-title"><b>${t('ui.offlineTitle')}</b></div><div class="win-body">
+    <p>${t('ui.offlineAway', { h, m })}</p>
+    <div class="kv"><span>${t('item.money')}</span><b>${money(r.money)}</b><span>${t('ui.offlineLevels')}</span><b>${fmt(r.levels)}</b></div>
+    ${items ? `<div class="tags">${items}</div>` : ''}<p class="meta">${t('ui.offlineHint')}</p>
+    <div class="btns center">${btn('closeModal', t('ui.continuePlay'), { cls: 'primary' })}</div></div></div>`;
 }

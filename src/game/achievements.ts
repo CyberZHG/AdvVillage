@@ -77,6 +77,12 @@ export const ACHIEVEMENTS: [string, Check][] = [
   ['goods500', (s) => s.stats.goods >= 500],
   ['decor15', (s) => s.buildings.filter((b) => BUILDINGS[b.type].kind === 'decor').length >= 15],
   ['items40', (s) => s.disc.filter((k) => ITEMS[k]).length >= 40],
+  ['catFriend', (s) => (s.cat?.lv ?? 0) >= 5],
+  ['catBest', (s) => (s.cat?.lv ?? 0) >= 10],
+  ['tamer', (s) => s.pets.length >= 1],
+  ['promoted', (s) => s.npcs.some((n) => n.promoted)],
+  ['research10', (s) => Object.values(s.research).reduce((a, b) => a + b, 0) >= 10],
+  ['deep10', (s) => Object.values(s.depth).some((d) => d >= 9)],
 ];
 
 export function checkAchievements(s: GameState, m: Meta): string[] {

@@ -1,6 +1,7 @@
 // Headless balance run: a naive auto-builder plays 16+ years.
 import { newGame } from '../src/game/state';
 import { step } from '../src/game/sim';
+import { RESEARCH, startResearch } from '../src/game/research';
 import { build, canBuild, upgrade, upgradeCost, hasCost, forgeable, forgeUpgrade, launchExpedition, computeScore } from '../src/game/econ';
 import { canPlaceAt } from '../src/game/world';
 import { EXPEDITIONS } from '../src/game/data';
@@ -46,8 +47,9 @@ while (s.time < total) {
     else if (canBuild(s, type) && tryPlace(type)) oi++;
     else if (oi >= order.length) {
       const b = s.buildings.filter((b) => b.type !== 'house').sort((a, b) => a.level - b.level)[0];
-      if (b && hasCost(s, upgradeCost(b)) && s.money > upgradeCost(b).money * 2) upgrade(s, b);
+      if (b && hasCost(s, upgradeCost(s, b)) && s.money > upgradeCost(s, b).money * 2) upgrade(s, b);
     }
+    for (const r of RESEARCH) if (s.money > 50000) startResearch(s, r.key);
     for (const slot of ['weapon', 'armor', 'accessory'] as const) for (const w of forgeable(s, slot)) if (s.money > 60000) forgeUpgrade(s, w, 'village');
     if (!s.exp) { const ex = EXPEDITIONS.filter((e) => year(s) >= e.unlockYear).pop(); if (ex && s.day % 15 === 0) launchExpedition(s, ex.key); }
     if (s.day % DAYS_PER_YEAR === 0) {
@@ -84,3 +86,5 @@ console.log('open commissions', JSON.stringify(s.commissions));
 const bioN = s.npcs.filter((n) => n.role === 'fighter').sort((a, b) => b.level - a.level)[0];
 console.log('top bio', JSON.stringify(bioN?.bio));
 console.log('disc', s.disc.length, 'items', Object.keys(s.items).length);
+console.log('research', JSON.stringify(s.research), 'depth', JSON.stringify(s.depth), 'pets', s.pets.map((p) => p.type).join(','), 'cat', JSON.stringify({ lv: s.cat?.lv, exp: s.cat?.exp, act: s.cat?.act }));
+console.log('promoted', s.npcs.filter((n) => n.promoted).length, 'hist', s.hist.length, JSON.stringify(s.hist.slice(-3)));

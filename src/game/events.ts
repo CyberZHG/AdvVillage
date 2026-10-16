@@ -15,6 +15,12 @@ export const FESTIVALS = ['flower', 'fireworks', 'harvest', 'lantern'];
 export const festival = (s: GameState): string | null =>
   monthOfSeason(s) === 1 && dayOfMonth(s) >= 4 && dayOfMonth(s) <= 6 ? FESTIVALS[season(s)] : null;
 
+// what people want changes with the weather: these places draw bigger crowds and pay more in their season
+export const SEASON_HOT: string[][] = [
+  ['teahouse', 'cafe', 'bakery'], ['tavern', 'souvenirShop', 'cafe'], ['restaurant', 'bakery', 'theater'], ['bathhouse', 'spa', 'inn', 'teahouse'],
+];
+export const hotNow = (s: GameState, type: string) => SEASON_HOT[season(s)].includes(type);
+
 export const hasEffect = (s: GameState, k: string) => s.effects.some((e) => e.k === k && e.until > s.time);
 
 export function touristMult(s: GameState) {

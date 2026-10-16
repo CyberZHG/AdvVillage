@@ -18,7 +18,7 @@ export type Goal =
 
 export interface Look {
   skin: number; hair: number; style: number; cloth: number; cloth2: number; pants: number;
-  outfit: string; head: string; beard: string; item: string;
+  outfit: string; head: string; beard: string; item: string; cape?: boolean;
 }
 
 export interface Npc {
@@ -32,7 +32,7 @@ export interface Npc {
   profile: number; plan: number[]; noFood: number; kills: number;
   title?: string; titles?: string[]; fk?: Record<string, number>; partner?: number | null; spouse?: number | null;
   downs?: number; yk?: number; exps?: number; bosses?: number;
-  rival?: number | null; bio?: LogEntry[]; vip?: string;
+  rival?: number | null; bio?: LogEntry[]; vip?: string; promoted?: boolean;
 }
 
 export interface Profile { name: number; job: string; look: Look; level: number; exp: number; visits: number }
@@ -49,6 +49,12 @@ export interface Score { npcs: number; buildings: number; npcLevels: number; bld
 export interface Effect { k: string; until: number }
 export interface Offer { item: string; count: number; price: number; sold?: boolean }
 export interface Couple { a: number; b: number; since: number; kids: number }
+export interface Pet { id: number; type: string; x: number; y: number; tx: number; ty: number; wait: number; facing: 1 | -1; since: number }
+export interface Cat {
+  x: number; y: number; path: P[]; act: string; timer: number; facing: 1 | -1;
+  lv: number; exp: number; fed: number; petT: number; at: number | null; target: number | null; since: number; next?: string;
+}
+export interface Month { e: number; t: number; k: number }
 export interface Rivalry { a: number; b: number; since: number; lead: number }
 export interface Commission {
   id: number; k: string; target?: string; need: number; base: number;
@@ -79,7 +85,9 @@ export interface GameState {
   comboSeen: string[]; weather: string; effects: Effect[]; bonds: Record<string, number>; couples: Couple[];
   reports: Report[]; ys: YearStats; shinySeen: string[]; merchant: { until: number; offers: Offer[]; foreign?: boolean } | null; nextBoss: number;
   fame: number; commissions: Commission[]; cseason: number; rivals: Rivalry[]; nextVip: number; vips: string[];
-  notes: LogEntry[];
+  notes: LogEntry[]; savedAt?: number;
+  research: Record<string, number>; researching: { k: string; until: number } | null; depth: Record<string, number>;
+  pets: Pet[]; cat: Cat | null; hist: Month[]; histBase: Month;
   stats: {
     income: number; lastIncome: number; kills: number; tourists: number;
     quests: number; rescues: number; expeditions: number; expLocs: string[];

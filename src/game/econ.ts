@@ -1,14 +1,17 @@
 import { DAY, EXPANSIONS } from './constants';
 import { comboIncome, discoverCombos } from './combos';
 import { ROAD_COST, BUILDINGS, EQUIP, EXPEDITIONS, ITEMS, equipByKey, shopTier, type Cost, type Slot } from './data';
-import { hasEffect } from './events';
+import { hasEffect, hotNow } from './events';
+import { rbonus } from './research';
+import { LUCKY_BONUS, luckyAt } from './cat';
+import { lvMult } from './level';
 import { bldExpNeed, gainExp } from './level';
 import { assignHousing, fx, log, mods, newId, ofKind, residents, year } from './state';
 import { doorOf, invalidateGrid, covers, placement, setRoad, syncBounds, villageDist } from './world';
 import type { Building, GameState, Score } from './types';
 
 export function earn(s: GameState, b: Building, amount: number) {
-  amount = Math.max(1, Math.round(amount * comboIncome(s, b)));
+  amount = Math.max(1, Math.round(amount * comboIncome(s, b) * (luckyAt(s, b.id) ? 1 + LUCKY_BONUS : 1)));
   s.money += amount;
   s.stats.income += amount;
   s.stats.earned += amount;
@@ -43,7 +46,7 @@ function payCost(s: GameState, c: Cost) {
 export function buildCost(s: GameState, type: string): Cost {
   const base = BUILDINGS[type].cost;
   const count = s.buildings.filter((b) => b.type === type).length;
-  const k = 1 + 0.35 * count;
+  const k = (1 + 0.35 * count) * (1 - rbonus(s, 'architecture'));
   return { money: Math.round(base.money * k), wood: Math.round((base.wood ?? 0) * k), stone: Math.round((base.stone ?? 0) * k) };
 }
 
@@ -77,18 +80,27 @@ export function placeRoad(s: GameState, x: number, y: number): boolean {
 
 export const removeRoad = (s: GameState, x: number, y: number) => setRoad(s, x, y, false);
 
-export function upgradeCost(b: Building): Cost {
+export function upgradeCost(s: GameState, b: Building): Cost {
   const base = BUILDINGS[b.type].cost;
-  const L = b.level;
+  const L = b.level, k = 1 - rbonus(s, 'architecture');
   return {
-    money: Math.round(Math.max(100, base.money) * 0.4 * L),
-    wood: Math.round(5 + 2 * L),
-    stone: Math.round(3 + 1.5 * L),
+    money: Math.round(Math.max(100, base.money) * 0.4 * L * k),
+    wood: Math.round((5 + 2 * L) * k),
+    stone: Math.round((3 + 1.5 * L) * k),
   };
 }
 
+// list price after level, research and the season's favourites
+export function priceAt(s: GameState, b: Building): number {
+  const d = BUILDINGS[b.type];
+  let p = d.price * lvMult(b.level) * (1 + rbonus(s, 'commerce'));
+  if (d.kind === 'food') p *= 1 + rbonus(s, 'cuisine');
+  if (hotNow(s, b.type)) p *= 1.25;
+  return p;
+}
+
 export function upgrade(s: GameState, b: Building): boolean {
-  const c = upgradeCost(b);
+  const c = upgradeCost(s, b);
   if (!hasCost(s, c)) return false;
   payCost(s, c);
   b.level++;
@@ -130,7 +142,7 @@ export function expand(s: GameState): boolean {
 export function forgeCost(s: GameState, key: string) {
   const e = equipByKey(key)!;
   const L = s.wlv[key] ?? 0;
-  const m = mods(s).forgeCost * (hasEffect(s, 'smith') ? 0.5 : 1);
+  const m = mods(s).forgeCost * (hasEffect(s, 'smith') ? 0.5 : 1) * (1 - rbonus(s, 'smithing'));
   return { money: Math.round(e.price * 0.3 * (1 + L) * m), mat: e.mat, count: Math.max(1, Math.round((2 + 2 * Math.floor(Math.sqrt(L))) * m)) };
 }
 

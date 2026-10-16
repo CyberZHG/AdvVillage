@@ -80,8 +80,9 @@ export const lookColors = (l: LookColors): Record<Channel, RGB> => ({
 export const HAIR_STYLES = 8;
 
 // draw order of the layer groups
-export function layerNames(o: { outfit: string; head: string; beard: string; item: string; style: number; ears?: boolean; face?: string }, frame: number): string[] {
-  const names = [`p/back/${o.item}`, `p/legs/${frame}`, `p/outfit/${o.outfit}`, `p/outfitA/${o.outfit}`, `p/skin/${o.face ?? 'human'}`];
+export function layerNames(o: { outfit: string; head: string; beard: string; item: string; style: number; ears?: boolean; face?: string; cape?: boolean }, frame: number): string[] {
+  const cape = o.cape ? ['p/cape/x'] : [], clasp = o.cape ? ['p/capeA/x'] : [];
+  const names = [...cape, `p/back/${o.item}`, `p/legs/${frame}`, `p/outfit/${o.outfit}`, `p/outfitA/${o.outfit}`, ...clasp, `p/skin/${o.face ?? 'human'}`];
   if (o.ears) names.push('p/ears/x');
   if (o.beard) names.push(`p/beard/${o.beard}`);
   if (!['knightHelm', 'hood', 'mitre'].includes(o.head) || o.style === 2) names.push(`p/hair/${o.style}`);

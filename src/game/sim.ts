@@ -8,12 +8,15 @@ import {
   addItem, assignHousing, attraction, bio, bld, fighterStats, freeBeds, fx, guild, isNight, log, makeNpc,
   maxHp, monsterStats, mods, newId, npcById, ofKind, spawnNode, tod, year, freshName, type Stats,
 } from './state';
-import { canForge, computeScore, earn, forgeUpgrade, goodsItem, goodsPrice } from './econ';
+import { canForge, computeScore, earn, forgeUpgrade, goodsItem, goodsPrice, priceAt } from './econ';
+import { rbonus, researchTick } from './research';
+import { catDaily, catTick, catTouristBonus } from './cat';
+import { petBonus, petsTick, tryTame } from './pets';
 import { commissionsDaily } from './commissions';
 import { addFame, fameTouristMult, vipDaily, vipLeave, vipSpend, vipVisit } from './fame';
 import { makeLook, randomJob } from './looks';
-import { currentBoss, eventsDaily, festival, hasEffect, monsterMult, spendMult, touristMult } from './events';
-import { bondFight, checkTitles, emote, familyDaily, partnerOf, rivalsDaily, rivalsMonthly } from './social';
+import { currentBoss, eventsDaily, festival, hasEffect, hotNow, monsterMult, spendMult, touristMult } from './events';
+import { bondFight, checkPromotion, checkTitles, emote, familyDaily, partnerOf, rivalsDaily, rivalsMonthly } from './social';
 import { closeYear } from './report';
 import { chance, dist, pick, rand, randi, weighted } from './util';
 import { ROAD_SPEED, doorOf, findPath, isRoad, randomStreetTile, randomVillageTile, randomZoneTile, segmentAvoidsVillage, villageDist, zoneOf } from './world';
@@ -30,6 +33,7 @@ const HUNGER_RATE = 100 / (6 * DAY);
 const MOOD_RATE = 100 / (6 * DAY);
 const MONSTER_INTERVAL = 1.2;
 const SHINY_RATE = 1 / 150;
+const DEPTH_LEVELS = 4;
 
 export function step(s: GameState, dt: number) {
   s.time += dt;
@@ -46,6 +50,9 @@ export function step(s: GameState, dt: number) {
   for (const n of [...s.npcs]) updateNpc(s, n, dt);
   for (const m of [...s.monsters]) updateMonster(s, m, dt);
   expeditionTick(s);
+  catTick(s, dt);
+  petsTick(s, dt);
+  researchTick(s);
 }
 
 // ---------- movement helpers ----------
@@ -97,7 +104,6 @@ function nearest(n: Npc, list: Building[]): Building | undefined {
   return best;
 }
 
-const priceAt = (b: Building) => BUILDINGS[b.type].price * lvMult(b.level);
 
 // charges a customer, adding the building's specialty when it is in stock and they can afford it
 function sell(s: GameState, n: Npc, b: Building, price: number) {
@@ -117,8 +123,10 @@ const BIO_LEVELS = new Set([10, 25, 50, 100, 150, 200, 300, 500, 1000, 2000, 500
 
 function gainNpcExp(s: GameState, n: Npc, amount: number) {
   const before = n.level;
-  const ups = gainExp(n, amount * (n.role === 'fighter' && hasEffect(s, 'sage') ? 1.5 : 1));
+  const boost = n.role === 'fighter' ? (hasEffect(s, 'sage') ? 1.5 : 1) * (1 + rbonus(s, 'training')) : 1;
+  const ups = gainExp(n, amount * boost);
   if (!ups) return;
+  checkPromotion(s, n);
   for (let L = before + 1; L <= n.level; L++) if (BIO_LEVELS.has(L)) bio(s, n, 'bio.level', { lv: L });
   fx(s, 'lvl', n.x, n.y, n.level);
   emote(s, n, 'star');
@@ -168,7 +176,7 @@ function decide(s: GameState, n: Npc) {
 
 function goRest(s: GameState, n: Npc) {
   const clinic = nearest(n, ofKind(s, 'clinic'));
-  const b = clinic && n.money >= priceAt(clinic) ? clinic : homeOrGuild(s, n);
+  const b = clinic && n.money >= priceAt(s, clinic) ? clinic : homeOrGuild(s, n);
   goBuilding(s, n, b, 'rest');
 }
 
@@ -182,7 +190,7 @@ function tryEat(s: GameState, n: Npc): boolean {
 }
 
 function tryFun(s: GameState, n: Npc): boolean {
-  const list = openNow(s, ofKind(s, 'fun')).filter((b) => n.money >= priceAt(b));
+  const list = openNow(s, ofKind(s, 'fun')).filter((b) => n.money >= priceAt(s, b));
   if (!list.length) return false;
   goBuilding(s, n, weighted(list, (b) => visitWeight(s, b))!, 'fun');
   return true;
@@ -287,7 +295,7 @@ function visitWeight(s: GameState, b: Building) {
   const t = tod(s);
   if (!isOpen(b.type, t)) return 0;
   const d = BUILDINGS[b.type];
-  return (d.attraction * lvMult(b.level) + (d.price > 0 ? 1 : 0.3)) * (isPeak(b.type, t) ? 3 : 1);
+  return (d.attraction * lvMult(b.level) + (d.price > 0 ? 1 : 0.3)) * (isPeak(b.type, t) ? 3 : 1) * (hotNow(s, b.type) ? 2.5 : 1);
 }
 
 function goLeave(s: GameState, n: Npc) { goTo(s, n, SOUTH_EXIT.x, SOUTH_EXIT.y, 'leave'); }
@@ -295,7 +303,7 @@ function goLeave(s: GameState, n: Npc) { goTo(s, n, SOUTH_EXIT.x, SOUTH_EXIT.y, 
 function decideVisitor(s: GameState, n: Npc) {
   if (n.role === 'tourist') {
     if (isNight(s)) {
-      const inn = nearest(n, ofKind(s, 'inn').filter((b) => n.money >= priceAt(b) * mods(s).touristSpend));
+      const inn = nearest(n, ofKind(s, 'inn').filter((b) => n.money >= priceAt(s, b) * mods(s).touristSpend));
       return inn ? goBuilding(s, n, inn, 'visit') : goLeave(s, n);
     }
     let b: Building | undefined;
@@ -340,7 +348,7 @@ function arrive(s: GameState, n: Npc) {
       const food = FOODS.find((f) => (s.items[f] ?? 0) > 0);
       if (!food) { n.noFood = s.time + DAY; return enter(n, b, 1); }
       s.items[food]--;
-      const price = Math.min(n.money, priceAt(b));
+      const price = Math.min(n.money, priceAt(s, b));
       if (price > 0) sell(s, n, b, price);
       n.hunger = 100; n.mood = Math.min(100, n.mood + 5);
       emote(s, n, 'food');
@@ -365,7 +373,7 @@ function arrive(s: GameState, n: Npc) {
       return enter(n, b, 4);
     }
     case 'fun': {
-      const price = priceAt(b);
+      const price = priceAt(s, b);
       if (n.money >= price) {
         sell(s, n, b, price); n.mood = 100;
         emote(s, n, 'note');
@@ -406,7 +414,7 @@ function arrive(s: GameState, n: Npc) {
 }
 
 function payClinic(s: GameState, n: Npc, b: Building) {
-  const fee = priceAt(b);
+  const fee = priceAt(s, b);
   if (n.money >= fee) sell(s, n, b, fee);
 }
 
@@ -416,7 +424,7 @@ function insideTick(s: GameState, n: Npc, dt: number) {
   if (n.goal === 'rest' || n.goal === 'sleep') {
     if (n.role === 'fighter') {
       const kind = BUILDINGS[b.type].kind;
-      const rate = (kind === 'clinic' ? 0.05 : kind === 'house' ? 0.025 : 0.012) * (n.home == null ? 0.5 : 1);
+      const rate = (kind === 'clinic' ? 0.05 : kind === 'house' ? 0.025 : 0.012) * (n.home == null ? 0.5 : 1) * (1 + rbonus(s, 'medicine'));
       n.hp = Math.min(maxHp(s, n), n.hp + maxHp(s, n) * rate * dt);
     }
     const done = n.goal === 'rest' ? n.hp >= maxHp(s, n) * 0.95 : !isNight(s);
@@ -513,7 +521,7 @@ function killMonster(s: GameState, m: Monster, killer: Npc) {
     s.ys.shinies++;
     log(s, 'log.shiny', { n: '@name:' + killer.name, m: '@m.' + m.type });
   }
-  const count = Math.max(1, Math.round(dropCount(L) * mods(s).drops * (m.boss != null ? 10 : m.shiny ? 3 : 1)));
+  const count = Math.max(1, Math.round(dropCount(L) * mods(s).drops * (m.boss != null ? 10 : m.shiny ? 3 : 1) * (1 + rbonus(s, 'logistics') + petBonus(s, 'scout'))));
   const drops = MONSTERS[m.type].drops;
   for (let i = 0; i < count; i++) {
     const item = weighted(drops, (d) => d[1])![0];
@@ -531,6 +539,7 @@ function killMonster(s: GameState, m: Monster, killer: Npc) {
     }
   }
   s.stats.kills++;
+  tryTame(s, m, killer.name);
   s.monsters = s.monsters.filter((o) => o !== m);
 }
 
@@ -641,7 +650,7 @@ function gatherTick(s: GameState, n: Npc, dt: number) {
   const node = s.nodes.find((o) => o.id === n.goalId);
   if (!node || isNight(s)) { n.state = 'idle'; return; }
   n.timer += dt;
-  const interval = 0.6 / (1 + 0.1 * Math.sqrt(n.level - 1));
+  const interval = 0.6 / (1 + 0.1 * Math.sqrt(n.level - 1)) / (1 + rbonus(s, 'gathering') + petBonus(s, 'hauler'));
   if (n.timer < interval) return;
   n.timer -= interval;
   const item = NODE_ITEM[node.kind];
@@ -726,7 +735,7 @@ function gift(s: GameState, p: Profile, L: number) {
 
 function visit(s: GameState, n: Npc, b: Building) {
   const def = BUILDINGS[b.type];
-  const price = priceAt(b) * (n.role === 'tourist' ? mods(s).touristSpend : 1) * spendMult(s) * vipSpend(n);
+  const price = priceAt(s, b) * (n.role === 'tourist' ? mods(s).touristSpend : 1) * spendMult(s) * vipSpend(n);
   const sat = lvMult(b.level);
   if (price > 0 && n.money >= price) {
     sell(s, n, b, price);
@@ -753,7 +762,8 @@ function touristSpawn(s: GameState, dt: number) {
   if (isNight(s) || tod(s) > 0.6) return;
   const visiting = new Set(s.npcs.filter((n) => n.role === 'tourist').map((n) => n.profile));
   if (visiting.size >= 30) return;
-  const perDay = Math.min(10, 0.3 + Math.sqrt(attraction(s)) / 2) * mods(s).touristRate * touristMult(s) * fameTouristMult(s);
+  const perDay = Math.min(10, 0.3 + Math.sqrt(attraction(s)) / 2) * mods(s).touristRate * touristMult(s) * fameTouristMult(s)
+    * (1 + rbonus(s, 'tourism') + catTouristBonus(s) + petBonus(s, 'mascot'));
   if (!chance((perDay * dt) / (DAY * 0.56))) return;
   let idx = -1;
   const returning = s.profiles.map((_, i) => i).filter((i) => !visiting.has(i));
@@ -789,6 +799,7 @@ function daily(s: GameState) {
   familyDaily(s);
   commissionsDaily(s);
   vipDaily(s);
+  catDaily(s);
   rivalsDaily(s);
   for (const n of s.npcs) if (n.role === 'fighter') checkTitles(s, n);
   assignHousing(s);
@@ -805,8 +816,25 @@ function daily(s: GameState) {
   }
 }
 
+// the wilds keep pace with the village: map monsters drift toward a share of the adventurers' strength
+function monsterDrift(s: GameState) {
+  const top = s.npcs.filter((n) => n.role === 'fighter').map((n) => n.level).sort((a, b) => b - a).slice(0, 6);
+  if (!top.length) return;
+  const avg = top.reduce((a, b) => a + b, 0) / top.length;
+  for (const [k, d] of Object.entries(MONSTERS)) {
+    const target = avg * (d.zone < 0 ? 0.8 : [0.25, 0.45, 0.65][d.zone]);
+    const ml = s.mlv[k];
+    if (ml.level < target) ml.level += Math.max(1, Math.round((target - ml.level) * 0.08));
+  }
+}
+
 function monthly(s: GameState) {
   rivalsMonthly(s);
+  monsterDrift(s);
+  const b = s.histBase;
+  s.hist.push({ e: s.stats.earned - b.e, t: s.stats.tourists - b.t, k: s.stats.kills - b.k });
+  if (s.hist.length > 240) s.hist.shift();
+  s.histBase = { e: s.stats.earned, t: s.stats.tourists, k: s.stats.kills };
   for (const n of s.npcs) {
     const h = bld(s, n.home);
     if (!h) continue;
@@ -922,6 +950,11 @@ function expeditionTick(s: GameState) {
     for (const n of ms) { n.exps = (n.exps ?? 0) + 1; checkTitles(s, n); bio(s, n, 'bio.expedition', { loc: '@ex.' + e.loc, w: e.wins }); }
     addFame(s, 5 + Math.floor(e.wins / 3));
     if (!s.stats.expLocs.includes(e.loc)) s.stats.expLocs.push(e.loc);
+    // a clean run lets the next party push one floor deeper
+    if (e.wins > e.losses * 2) {
+      s.depth[e.loc] = (s.depth[e.loc] ?? 0) + 1;
+      log(s, 'log.deeper', { loc: '@ex.' + e.loc, d: s.depth[e.loc] + 1 });
+    }
     log(s, 'log.expReturn', { loc: '@ex.' + e.loc, w: e.wins, l: e.losses, c: items.reduce((a, [, c]) => a + c, 0) });
     s.exp = null;
   }
@@ -933,7 +966,8 @@ function expeditionDay(s: GameState, e: Expedition, ms: Npc[]) {
   for (let b = 0; b < battles; b++) {
     const type = pick(def.monsters);
     if (!s.seen.includes(type)) s.seen.push(type);
-    const mst = monsterStats(s, type);
+    const depth = s.depth[e.loc] ?? 0;
+    const mst = monsterStats(s, type, { lv: s.mlv[type].level + depth * DEPTH_LEVELS } as Monster);
     const g = randi(1, 3);
     const sts = ms.map((n) => fighterStats(s, n));
     const partyDps = sts.reduce((a, st) => a + Math.max(1, st.atk - mst.def * 0.5) / st.interval, 0);
@@ -947,7 +981,7 @@ function expeditionDay(s: GameState, e: Expedition, ms: Npc[]) {
       const frac = Math.min(0.8, (ttkM / ttkP) * 0.5);
       for (const n of ms) { n.hp = Math.max(1, n.hp - maxHp(s, n) * frac * rand(0.5, 1)); gainNpcExp(s, n, expReward(mst.level) * g); }
       gainMonsterExp(s, type, expReward(avgL) * 0.05 * g);
-      const count = Math.max(1, Math.round(dropCount(mst.level) * g * mods(s).drops));
+      const count = Math.max(1, Math.round(dropCount(mst.level) * g * mods(s).drops * (1 + 0.15 * depth)));
       for (let i = 0; i < count; i++) {
         const item = weighted(MONSTERS[type].drops, (d) => d[1])![0];
         e.loot[item] = (e.loot[item] ?? 0) + 1;

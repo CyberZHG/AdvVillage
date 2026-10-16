@@ -18,3 +18,4 @@ export const EAST_EXIT = { x: MAP - 1, y: 32 };
 export const HOUSE_CAP = 4;
 export const NIGHT_START = 0.75;
 export const MORNING = 0.04;
+export const PROMOTE_LEVEL = 100;

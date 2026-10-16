@@ -4,13 +4,14 @@ import { maxHp, monsterStats, tod } from '../game/state';
 import { blocked, inVillage, isRoad, placement, roadState, zoneOf } from '../game/world';
 import { t } from '../i18n';
 import { drawAtmosphere, drawEmote, nightAlpha } from './atmosphere';
-import type { GameState, Npc } from '../game/types';
+import type { Cat, GameState, Npc } from '../game/types';
+import { hasPerk } from '../game/cat';
 import { makeCanvas } from './pixel';
 import {
-  TILE_H, buildingSprite, draw, humanSprite, lyingSprite, monsterSprite, nodeSprite, tileSprite, type Sprite, type TileKind,
+  TILE_H, buildingSprite, catNeck, catSprite, draw, humanSprite, lyingSprite, monsterSprite, nodeSprite, tileSprite, type Sprite, type TileKind,
 } from './art';
 
-export type Sel = { kind: 'npc' | 'bld' | 'mon'; id: number } | null;
+export type Sel = { kind: 'npc' | 'bld' | 'mon' | 'pet' | 'cat'; id: number } | null;
 interface Floater { x: number; y: number; text: string; color: string; t: number }
 interface Drawable { depth: number; draw: () => void; hit?: { x: number; y: number; w: number; h: number; sel: Sel } }
 
@@ -202,6 +203,43 @@ export class Renderer {
         hit: { x: px - sp.ax * k, y: top, w: sp.w * k, h: sp.h * k, sel: { kind: 'mon', id: m.id } },
       });
     }
+    for (const p of s.pets) {
+      const px = sx(p.x, p.y), py = sy(p.x, p.y);
+      if (!visible(px, py)) continue;
+      const moving = p.wait <= 0;
+      const sp = monsterSprite(p.type, moving ? Math.floor(time * 4 + p.id) % 2 : 0, p.facing < 0);
+      const sel = this.selected?.kind === 'pet' && this.selected.id === p.id;
+      list.push({
+        depth: p.x + p.y,
+        draw: () => {
+          this.shadow(px, py);
+          blit(sp, px, py);
+          this.heart(px, py - sp.ay - 3, Math.sin(time * 2 + p.id) > 0.2);
+          if (sel) this.marker(px, py - sp.ay - 7);
+        },
+        hit: { x: px - sp.ax, y: py - sp.ay, w: sp.w, h: sp.h, sel: { kind: 'pet', id: p.id } },
+      });
+    }
+    if (s.cat) {
+      const c = s.cat, px = sx(c.x, c.y), py = sy(c.x, c.y);
+      if (visible(px, py)) {
+        const fr = catFrame(c, time);
+        const sp = catSprite(fr, c.facing < 0);
+        const sel = this.selected?.kind === 'cat';
+        list.push({
+          depth: c.x + c.y,
+          draw: () => {
+            this.shadow(px, py);
+            blit(sp, px, py);
+            this.collar(s, sp, fr, c.facing < 0, px, py);
+            if (c.act === 'sleep') this.zzz(px + 4, py - sp.ay, time);
+            if (c.act === 'happy') drawEmote(ctx, 'heart', px, py - sp.ay - 1);
+            if (sel) this.marker(px, py - sp.ay - 6);
+          },
+          hit: { x: px - sp.ax - 2, y: py - sp.ay - 2, w: sp.w + 4, h: sp.h + 4, sel: { kind: 'cat', id: 0 } },
+        });
+      }
+    }
     for (const n of s.npcs) {
       if (n.inside != null || n.state === 'away' || n.state === 'carried') continue;
       const px = sx(n.x, n.y), py = sy(n.x, n.y);
@@ -308,6 +346,38 @@ export class Renderer {
     ctx.fillRect(px + 3, py + 1, 2, 1);
     ctx.fillRect(px - 6, py, 1, 1);
     ctx.fillRect(px + 5, py, 1, 1);
+  }
+
+  private heart(px: number, py: number, on: boolean) {
+    if (!on) return;
+    const ctx = this.lctx;
+    ctx.fillStyle = '#ff6a8a';
+    ctx.fillRect(px - 2, py, 2, 1); ctx.fillRect(px + 1, py, 2, 1); ctx.fillRect(px - 2, py + 1, 5, 1); ctx.fillRect(px - 1, py + 2, 3, 1); ctx.fillRect(px, py + 3, 1, 1);
+  }
+
+  // ribbon from affection Lv.7, a gold bell at Lv.10
+  private collar(s: GameState, sp: Sprite, frame: string, flip: boolean, px: number, py: number) {
+    if (!hasPerk(s, 'ribbon')) return;
+    const [nx0, ny] = catNeck(frame);
+    const nx = flip ? sp.w - 1 - nx0 : nx0;
+    const x = px - sp.ax + nx, y = py - sp.ay + ny;
+    const ctx = this.lctx;
+    ctx.fillStyle = '#e03a5a';
+    ctx.fillRect(x - 2, y, 5, 1);
+    ctx.fillRect(x - 2, y - 1, 1, 3); ctx.fillRect(x + 2, y - 1, 1, 3);
+    if (hasPerk(s, 'bell')) { ctx.fillStyle = '#ffd84a'; ctx.fillRect(x, y + 1, 1, 2); }
+  }
+
+  private zzz(px: number, py: number, time: number) {
+    const ctx = this.lctx;
+    ctx.fillStyle = '#e8f0ff';
+    for (let k = 0; k < 2; k++) {
+      const f = (time * 0.5 + k / 2) % 1;
+      const x = Math.round(px + f * 5), y = Math.round(py - 2 - f * 8), n = k ? 2 : 3;
+      ctx.globalAlpha = 1 - f;
+      ctx.fillRect(x, y, n, 1); ctx.fillRect(x + n - 2, y + 1, 1, 1); ctx.fillRect(x, y + 2, n, 1);
+    }
+    ctx.globalAlpha = 1;
   }
 
   private vipMark(px: number, py: number, time: number) {
@@ -461,4 +531,17 @@ function shinySprite(sp: Sprite, key: string): Sprite {
     shinyCache.set(key, out);
   }
   return out;
+}
+
+// picks the animation frame for what the cat is doing
+function catFrame(c: Cat, time: number): string {
+  switch (c.act) {
+    case 'walk': case 'follow': return c.path.length || c.act === 'follow' ? `walk${Math.floor(time * 8) % 4}` : 'sit0';
+    case 'sleep': return `sleep${Math.floor(time * 0.8) % 2}`;
+    case 'groom': return `groom${Math.floor(time * 2.5) % 2}`;
+    case 'stretch': return 'stretch';
+    case 'lie': return 'lie';
+    case 'happy': return 'happy';
+    default: return time % 4 < 0.15 ? 'blink' : Math.floor(time * 1.2) % 3 === 0 ? 'sit1' : 'sit0';
+  }
 }
