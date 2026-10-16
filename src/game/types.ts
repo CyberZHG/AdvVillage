@@ -1,7 +1,7 @@
 import type { ClassKey, NodeKind } from './data';
 
 export interface P { x: number; y: number }
-export interface Building { id: number; type: string; x: number; y: number; rot: number; level: number; exp: number; yi?: number; door?: P | null }
+export interface Building { id: number; type: string; x: number; y: number; rot: number; level: number; exp: number; yi?: number; door?: P | null; goodsOff?: boolean }
 export interface ResNode { id: number; kind: NodeKind; x: number; y: number; amount: number; v: number }
 export interface Monster {
   id: number; type: string; x: number; y: number; hp: number; tx: number; ty: number;
@@ -32,6 +32,7 @@ export interface Npc {
   profile: number; plan: number[]; noFood: number; kills: number;
   title?: string; titles?: string[]; fk?: Record<string, number>; partner?: number | null; spouse?: number | null;
   downs?: number; yk?: number; exps?: number; bosses?: number;
+  rival?: number | null; bio?: LogEntry[]; vip?: string;
 }
 
 export interface Profile { name: number; job: string; look: Look; level: number; exp: number; visits: number }
@@ -48,11 +49,21 @@ export interface Score { npcs: number; buildings: number; npcLevels: number; bld
 export interface Effect { k: string; until: number }
 export interface Offer { item: string; count: number; price: number; sold?: boolean }
 export interface Couple { a: number; b: number; since: number; kids: number }
-export interface YearStats { income: number; kills: number; tourists: number; quests: number; expeditions: number; bosses: number; shinies: number; events: LogEntry[] }
+export interface Rivalry { a: number; b: number; since: number; lead: number }
+export interface Commission {
+  id: number; k: string; target?: string; need: number; base: number;
+  money: number; fame: number; item?: string; count?: number; done?: boolean;
+}
+export interface YearStats {
+  income: number; kills: number; tourists: number; quests: number; expeditions: number; bosses: number; shinies: number;
+  commissions?: number; fame?: number; events: LogEntry[];
+}
 export interface Report {
   year: number; income: number; kills: number; tourists: number; quests: number; expeditions: number; bosses: number;
   residents: number; buildings: number; star?: { name: number; cls: string; kills: number; level: number };
   shop?: { type: string; income: number }; events: LogEntry[];
+  commissions?: number; fame?: number; rank?: number;
+  rival?: { a: number; b: number; ak: number; bk: number; al: number; bl: number };
 }
 
 export interface GameState {
@@ -66,10 +77,13 @@ export interface GameState {
   nextId: number; log: LogEntry[]; scored: boolean; score: Score | null;
   timers: { spawn: number; node: number; rescue: number };
   comboSeen: string[]; weather: string; effects: Effect[]; bonds: Record<string, number>; couples: Couple[];
-  reports: Report[]; ys: YearStats; shinySeen: string[]; merchant: { until: number; offers: Offer[] } | null; nextBoss: number;
+  reports: Report[]; ys: YearStats; shinySeen: string[]; merchant: { until: number; offers: Offer[]; foreign?: boolean } | null; nextBoss: number;
+  fame: number; commissions: Commission[]; cseason: number; rivals: Rivalry[]; nextVip: number; vips: string[];
+  notes: LogEntry[];
   stats: {
     income: number; lastIncome: number; kills: number; tourists: number;
     quests: number; rescues: number; expeditions: number; expLocs: string[];
+    earned: number; commissions: number; goods: number; fk: Record<string, number>;
   };
   fx: Fx[];
 }

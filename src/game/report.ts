@@ -1,4 +1,5 @@
-import { emptyYear, log, residents } from './state';
+import { emptyYear, log, npcById, residents } from './state';
+import { fameRank } from './fame';
 import type { GameState, Report } from './types';
 
 // compiled silently at year end; the player opens it from the village panel whenever they like
@@ -13,6 +14,10 @@ export function closeYear(s: GameState) {
   };
   if (star && (star.yk ?? 0) > 0) r.star = { name: star.name, cls: star.cls, kills: star.yk ?? 0, level: star.level };
   if (shop && (shop.yi ?? 0) > 0) r.shop = { type: shop.type, income: shop.yi ?? 0 };
+  r.commissions = ys.commissions ?? 0; r.fame = ys.fame ?? 0; r.rank = fameRank(s.fame);
+  const pairs = s.rivals.map((x) => [npcById(s, x.a), npcById(s, x.b)] as const).filter(([a, b]) => a && b);
+  const top = pairs.sort(([a, b], [c, d]) => c!.kills + d!.kills - a!.kills - b!.kills)[0];
+  if (top) { const [a, b] = top as [NonNullable<typeof top[0]>, NonNullable<typeof top[1]>]; r.rival = { a: a.name, b: b.name, ak: a.kills, bk: b.kills, al: a.level, bl: b.level }; }
   s.reports.push(r);
   if (s.reports.length > 20) s.reports.shift();
   s.ys = emptyYear();

@@ -40,9 +40,14 @@ export function fmt(n: number): string {
   return n.toLocaleString('en-US');
 }
 
-function param(v: unknown): string {
+// resolves a stored log parameter ("@key", "@name:3", "@key|n|@x") to display text
+export function param(v: unknown): string {
   if (typeof v === 'number') return fmt(v);
   if (typeof v === 'string' && v.startsWith('@name:')) return npcName(Number(v.slice(6)));
+  if (typeof v === 'string' && v.startsWith('@') && v.includes('|')) {
+    const [k, n, x] = v.slice(1).split('|');
+    return t(k, { n: Number(n), x });
+  }
   if (typeof v === 'string' && v.startsWith('@')) return t(v.slice(1));
   return String(v ?? '');
 }

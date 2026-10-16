@@ -2,7 +2,7 @@ import { baseRoads, doorOf, syncBounds, syncRoads } from './world';
 import { MAP } from './constants';
 import { BUILDINGS, MONSTERS, VILLAGES, villageMods } from './data';
 import { decode, encode } from './codec';
-import { makeLook, randomJob } from './looks';
+import { makeLook, randomJob, recolor } from './looks';
 import { emptyYear } from './state';
 import type { GameState } from './types';
 
@@ -15,7 +15,7 @@ function storage(): Storage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; }
 }
 
-const serialize = (s: GameState) => JSON.stringify({ ...s, fx: [] });
+const serialize = (s: GameState) => JSON.stringify({ ...s, fx: [], notes: [] });
 
 export function saveGame(s: GameState) {
   try { storage()?.setItem(KEY + s.village, encode(serialize(s))); } catch { /* quota or private mode */ }
@@ -37,9 +37,17 @@ function restore(s: GameState): GameState {
   s.comboSeen ??= []; s.weather ??= 'clear'; s.effects ??= []; s.bonds ??= {}; s.couples ??= []; s.reports ??= [];
   s.ys ??= emptyYear(); s.shinySeen ??= []; s.merchant ??= null; s.nextBoss ??= s.day + 30;
   s.vlv ??= 0;
+  s.fame ??= 0; s.commissions ??= []; s.cseason ??= -1; s.rivals ??= []; s.nextVip ??= s.day + 30; s.vips ??= []; s.notes = [];
+  s.stats.earned ??= 0; s.stats.commissions ??= 0; s.stats.goods ??= 0; s.stats.fk ??= {};
   syncBounds(s);
   if (!s.roads) migrateRoads(s);
   migrateMonstersAndLooks(s);
+  if ((s.v ?? 1) < 3) {
+    for (const n of s.npcs) if (n.role !== 'tourist') recolor(n.look, n.role, n.cls);
+    for (const p of s.profiles) recolor(p.look, 'tourist', 'warrior');
+    for (const n of s.npcs) if (n.role === 'tourist' && s.profiles[n.profile]) n.look = s.profiles[n.profile].look;
+    s.v = 3;
+  }
   return s;
 }
 

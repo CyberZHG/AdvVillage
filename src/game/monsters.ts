@@ -135,10 +135,34 @@ const ROWS: Row[] = [
   ['abyssLord', 'humanoid', 190, -1, [['soulGem', 3], ['mithril', 2]], undefined, 2.2],
 ];
 
+// every family has a signature material and a rare find on top of each monster's own drops
+const FAM_DROPS: Record<Fam, [string, number][]> = {
+  slime: [['slimeCore', 0.25]], flyer: [['honey', 0.6]], bird: [['egg', 1], ['feather', 0.5]], beast: [['claw', 0.8]],
+  boar: [['tusk', 1]], bear: [['claw', 1], ['honey', 0.5]], humanoid: [['oldCoin', 0.3]], golem: [['golemCore', 0.25]],
+  spider: [['venom', 0.6]], scorpion: [['stinger', 1]], beetle: [['amber', 0.3]], ghost: [['moonstone', 0.15]],
+  wisp: [['wispLight', 0.6]], plant: [['herb', 1.2]], mushroom: [['herb', 0.8], ['truffle', 0.15]], snake: [['snakeskin', 1]],
+  crab: [['pearl', 0.2]], frog: [['herb', 0.6]], mimic: [['oldCoin', 2], ['pearl', 0.5]], dragon: [['dragonFang', 0.4]],
+};
+// per-monster finds for the ones whose look calls for something specific
+const EXTRA: Record<string, [string, number][]> = {
+  bee: [['honey', 2]], koboldMiner: [['silverOre', 1.5]], ironGolem: [['silverOre', 1]], sandGolem: [['amber', 0.5]],
+  gargoyle: [['moonstone', 0.15]], lich: [['moonstone', 0.4]], iceWraith: [['moonstone', 0.3]], scarab: [['amber', 0.6]],
+  bandit: [['oldCoin', 0.8]], goblin: [['oldCoin', 0.4]], darkKnight: [['silverOre', 0.6]], cursedArmor: [['silverOre', 1]],
+  voidSlime: [['voidShard', 0.5]], eldritchEye: [['voidShard', 0.6]], abyssLord: [['voidShard', 1]], demon: [['voidShard', 0.3]],
+  shadowBeast: [['voidShard', 0.3]], sentry: [['silverOre', 1]], fairy: [['honey', 1]], pixie: [['honey', 0.5]],
+  kobold: [['silverOre', 0.2]], orc: [['silverOre', 0.3]], treant: [['amber', 0.8]], manEater: [['amber', 0.2]],
+  frog: [['pearl', 0.1]], bogToad: [['pearl', 0.15]], giantToad: [['pearl', 0.3]], hydra: [['pearl', 0.3]],
+};
+
 export const MONSTERS: Record<string, MonsterDef> = Object.fromEntries(ROWS.map(([key, fam, base, zone, drops, biomes, mult]) => {
   const [hp, atk, def] = FAM[fam];
   const k = mult ?? 1;
-  return [key, { fam, hp: Math.round(hp * k), atk: atk * Math.sqrt(k), def: def * Math.sqrt(k), base, zone, drops, biomes }];
+  const all = [...drops];
+  for (const [item, w] of [...FAM_DROPS[fam], ...(EXTRA[key] ?? [])]) {
+    const have = all.find((d) => d[0] === item);
+    if (have) have[1] += w; else all.push([item, w]);
+  }
+  return [key, { fam, hp: Math.round(hp * k), atk: atk * Math.sqrt(k), def: def * Math.sqrt(k), base, zone, drops: all, biomes }];
 }));
 
 // expedition natives also roam the map, rarely, in the ring that matches their strength

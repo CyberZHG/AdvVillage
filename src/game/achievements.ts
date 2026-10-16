@@ -1,8 +1,10 @@
-import { CLASS_KEYS, EXPEDITIONS, MONSTERS, VILLAGES } from './data';
+import { CLASS_KEYS, EQUIP, EXPEDITIONS, MONSTERS, VILLAGES } from './data';
 import { EXPANSIONS } from './constants';
 import { residents } from './state';
 import { COMBOS } from './combos';
 import { festival } from './events';
+import { fameRank } from './fame';
+import { BUILDINGS, ITEMS } from './data';
 import type { GameState } from './types';
 import type { Meta } from './save';
 
@@ -63,6 +65,18 @@ export const ACHIEVEMENTS: [string, Check][] = [
   ['comboAll', (s) => COMBOS.every((c) => s.comboSeen.includes(c.key))],
   ['festival', (s) => festival(s) !== null],
   ['newspaper', (s) => s.reports.length >= 1],
+  ['commission1', (s) => s.stats.commissions >= 1],
+  ['commission30', (s) => s.stats.commissions >= 30],
+  ['fame3', (s) => fameRank(s.fame) >= 3],
+  ['fame6', (s) => fameRank(s.fame) >= 6],
+  ['fameMax', (s) => fameRank(s.fame) >= 9],
+  ['royalVisit', (s) => s.vips.includes('royal')],
+  ['heroJoined', (s) => s.vips.includes('hero')],
+  ['rivals', (s) => s.rivals.length >= 1],
+  ['forgeAll', (s) => (['weapon', 'armor', 'accessory'] as const).every((slot) => EQUIP[slot].some((e) => (s.wlv[e.key] ?? 0) >= 10))],
+  ['goods500', (s) => s.stats.goods >= 500],
+  ['decor15', (s) => s.buildings.filter((b) => BUILDINGS[b.type].kind === 'decor').length >= 15],
+  ['items40', (s) => s.disc.filter((k) => ITEMS[k]).length >= 40],
 ];
 
 export function checkAchievements(s: GameState, m: Meta): string[] {

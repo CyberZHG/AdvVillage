@@ -1,7 +1,7 @@
 // Headless balance run: a naive auto-builder plays 16+ years.
 import { newGame } from '../src/game/state';
 import { step } from '../src/game/sim';
-import { build, canBuild, upgrade, upgradeCost, hasCost, forgeableWeapons, forgeUpgrade, launchExpedition, computeScore } from '../src/game/econ';
+import { build, canBuild, upgrade, upgradeCost, hasCost, forgeable, forgeUpgrade, launchExpedition, computeScore } from '../src/game/econ';
 import { canPlaceAt } from '../src/game/world';
 import { EXPEDITIONS } from '../src/game/data';
 import { TICK, DAY, DAYS_PER_YEAR } from '../src/game/constants';
@@ -48,7 +48,7 @@ while (s.time < total) {
       const b = s.buildings.filter((b) => b.type !== 'house').sort((a, b) => a.level - b.level)[0];
       if (b && hasCost(s, upgradeCost(b)) && s.money > upgradeCost(b).money * 2) upgrade(s, b);
     }
-    for (const w of forgeableWeapons(s)) if (s.money > 60000) forgeUpgrade(s, w, 'village');
+    for (const slot of ['weapon', 'armor', 'accessory'] as const) for (const w of forgeable(s, slot)) if (s.money > 60000) forgeUpgrade(s, w, 'village');
     if (!s.exp) { const ex = EXPEDITIONS.filter((e) => year(s) >= e.unlockYear).pop(); if (ex && s.day % 15 === 0) launchExpedition(s, ex.key); }
     if (s.day % DAYS_PER_YEAR === 0) {
       const f = s.npcs.filter((n) => n.role === 'fighter');
@@ -79,3 +79,8 @@ console.log('combos seen', s.comboSeen.join(','));
 console.log('couples', s.couples.length, 'partners', s.npcs.filter((n) => n.partner != null).length, 'titled', s.npcs.filter((n) => n.titles?.length).length, 'titles', [...new Set(s.npcs.flatMap((n) => n.titles ?? []))].join(','));
 console.log('shinySeen', s.shinySeen.length, 'seen', s.seen.length, 'weather', s.weather, 'effects', JSON.stringify(s.effects));
 console.log('bosses total', s.reports.reduce((a, r) => a + r.bosses, 0) + s.ys.bosses, 'kids', s.couples.reduce((a, c) => a + c.kids, 0));
+console.log('fame', s.fame, 'commissions', s.stats.commissions, 'goods', s.stats.goods, 'vips', s.vips.join(','), 'rivals', s.rivals.length, 'earned', s.stats.earned);
+console.log('open commissions', JSON.stringify(s.commissions));
+const bioN = s.npcs.filter((n) => n.role === 'fighter').sort((a, b) => b.level - a.level)[0];
+console.log('top bio', JSON.stringify(bioN?.bio));
+console.log('disc', s.disc.length, 'items', Object.keys(s.items).length);

@@ -1,5 +1,5 @@
 import { DAYS_PER_YEAR, HOUSE_CAP, SOUTH_EXIT } from './constants';
-import { bld, fx, housed, log, makeNpc, npcById } from './state';
+import { bio, bld, fx, housed, log, makeNpc, npcById } from './state';
 import { chance } from './util';
 import type { GameState, Npc } from './types';
 
@@ -46,6 +46,7 @@ export function checkTitles(s: GameState, n: Npc) {
     (n.titles ??= []).push(k);
     n.title = k;
     emote(s, n, 'star');
+    bio(s, n, 'bio.title', { t: `@title.${k}` });
     log(s, 'log.title', { n: '@name:' + n.name, t: `@title.${k}` });
   }
 }
@@ -60,6 +61,7 @@ export function bondFight(s: GameState, team: Npc[]) {
     if (v >= 60 && a.partner == null && b.partner == null) {
       a.partner = b.id; b.partner = a.id;
       emote(s, a, 'heart'); emote(s, b, 'heart');
+      bio(s, a, 'bio.partner', { n: '@name:' + b.name }); bio(s, b, 'bio.partner', { n: '@name:' + a.name });
       log(s, 'log.partner', { a: '@name:' + a.name, b: '@name:' + b.name });
     }
     if (v >= 200 && a.partner === b.id && a.spouse == null && b.spouse == null && chance(0.02)) marry(s, a, b);
@@ -72,6 +74,7 @@ function marry(s: GameState, a: Npc, b: Npc) {
   const home = bld(s, a.home);
   if (home && housed(s, home) < HOUSE_CAP) b.home = home.id;
   emote(s, a, 'heart'); emote(s, b, 'heart');
+  bio(s, a, 'bio.married', { n: '@name:' + b.name }); bio(s, b, 'bio.married', { n: '@name:' + a.name });
   log(s, 'log.married', { a: '@name:' + a.name, b: '@name:' + b.name });
 }
 
@@ -84,12 +87,46 @@ export function familyDaily(s: GameState) {
     const kid = makeNpc(s, 'fighter', SOUTH_EXIT.x, SOUTH_EXIT.y);
     kid.look = { ...kid.look, skin: chance(0.5) ? a.look.skin : b.look.skin, hair: chance(0.5) ? a.look.hair : b.look.hair };
     kid.home = a.home;
+    kid.bio = [{ t: s.day, k: 'bio.born', p: { a: '@name:' + a.name, b: '@name:' + b.name } }];
     s.npcs.push(kid);
     c.kids++;
+    bio(s, a, 'bio.child', { n: '@name:' + kid.name }); bio(s, b, 'bio.child', { n: '@name:' + kid.name });
     log(s, 'log.child', { a: '@name:' + a.name, b: '@name:' + b.name, n: '@name:' + kid.name, c: '@cls.' + kid.cls });
   }
 }
 
 export function partnerOf(s: GameState, n: Npc) {
   return n.partner != null ? npcById(s, n.partner) : undefined;
+}
+
+// fighters of the same class and similar strength keep an eye on each other
+export function rivalsMonthly(s: GameState) {
+  s.rivals = s.rivals.filter((r) => npcById(s, r.a) && npcById(s, r.b));
+  const linked = new Set(s.rivals.flatMap((r) => [r.a, r.b]));
+  for (const n of s.npcs) if (n.rival != null && !linked.has(n.id)) n.rival = null;
+  const all = s.npcs.filter((n) => n.role === 'fighter');
+  if (s.rivals.length >= Math.floor(all.length / 6)) return;
+  const free = all.filter((n) => n.rival == null && n.level >= 5);
+  for (const a of free) {
+    if (a.rival != null || !chance(0.3)) continue;
+    const b = free.find((o) => o !== a && o.rival == null && o.cls === a.cls && o.id !== a.partner && o.level / a.level > 0.8 && o.level / a.level < 1.25);
+    if (!b) continue;
+    a.rival = b.id; b.rival = a.id;
+    s.rivals.push({ a: a.id, b: b.id, since: s.day, lead: a.level >= b.level ? a.id : b.id });
+    bio(s, a, 'bio.rival', { n: '@name:' + b.name }); bio(s, b, 'bio.rival', { n: '@name:' + a.name });
+    log(s, 'log.rival', { a: '@name:' + a.name, b: '@name:' + b.name, c: '@cls.' + a.cls });
+    return;
+  }
+}
+
+export function rivalsDaily(s: GameState) {
+  for (const r of s.rivals) {
+    const a = npcById(s, r.a), b = npcById(s, r.b);
+    if (!a || !b || a.level === b.level) continue;
+    const top = a.level > b.level ? a : b, other = top === a ? b : a;
+    if (top.id === r.lead) continue;
+    r.lead = top.id;
+    bio(s, top, 'bio.overtook', { n: '@name:' + other.name, lv: top.level });
+    log(s, 'log.overtook', { a: '@name:' + top.name, b: '@name:' + other.name, lv: top.level });
+  }
 }

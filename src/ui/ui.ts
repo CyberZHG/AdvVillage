@@ -1,7 +1,7 @@
-import { t, fmt, npcName, LANGS, getLang } from '../i18n';
+import { t, fmt, npcName, param, LANGS, getLang } from '../i18n';
 import {
-  BUILDINGS, CATEGORIES, CLASS_KEYS, EQUIP, EXPEDITIONS, ITEMS, MONSTERS, mapZone, ROAD_COST, SHOP_TIER_LEVELS, VILLAGES, shopTier, equipByKey,
-  type Category, type Cost,
+  BUILDINGS, CATEGORIES, CLASS_KEYS, DECOR_MAX, DECOR_RADIUS, DECOR_STEP, EQUIP, EXPEDITIONS, ITEMS, MONSTERS, mapZone, ROAD_COST,
+  SHOP_TIER_LEVELS, VILLAGES, shopTier, equipByKey, type Category, type Cost, type Slot,
 } from '../game/data';
 import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, HOUSE_CAP, SCORE_YEAR } from '../game/constants';
 import { bldExpNeed, expNeed, famExpNeed, forgeMult, lvMult } from '../game/level';
@@ -9,10 +9,12 @@ import {
   attraction, bld, debuffs, fighterStats, housed, maxHp, monsterStats, npcById, residents, tod, year,
 } from '../game/state';
 import {
-  buildCost, canBuild, computeScore, expansionCost, forgeCost, forgeableWeapons, hasCost, upgradeCost,
+  buildCost, canBuild, computeScore, expansionCost, forgeCost, forgeable, goodsItem, goodsPrice, hasCost, upgradeCost,
 } from '../game/econ';
+import { commissionText, progress, seasonEnds } from '../game/commissions';
+import { FAME_RANKS, VIPS, fameRank } from '../game/fame';
 import { ACHIEVEMENTS } from '../game/achievements';
-import { COMBOS, COMBO_RADIUS, activeCombos, combosOf } from '../game/combos';
+import { COMBOS, COMBO_RADIUS, activeCombos, combosOf, decorBonus } from '../game/combos';
 import { SEASONS, currentBoss, festival, season } from '../game/events';
 import { titleBonus } from '../game/social';
 import { buildingIcon, humanIcon, itemIcon, monsterIcon } from '../render/art';
@@ -30,6 +32,7 @@ export interface Ctl {
   selected: { kind: 'npc' | 'bld' | 'mon'; id: number } | null;
   labels: boolean;
   focus: boolean;
+  follow: number | null;
   act(action: string, arg: string): void;
 }
 
@@ -141,7 +144,8 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     const roads = `<div class="card"><div class="card-img">${img(itemIcon('stone'), 'ic big')}</div><div class="card-main"><b>${t('ui.road')}</b>
       <div class="desc">${t('ui.roadDesc')}</div>${money(ROAD_COST, s.money >= ROAD_COST)} <small>${t('ui.perTile')}</small></div>
       <div class="btns">${btn('place:road', t('ui.paint'))}${btn('place:unroad', t('ui.remove'))}</div></div>`;
-    return cats + roads + `<div class="grid">${Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].buildable !== false && BUILDINGS[k].cat === buildCat).map((k) => {
+    const note = buildCat === 'decor' ? `<p class="meta">${t('ui.decorNote', { p: Math.round(DECOR_STEP * 100), r: DECOR_RADIUS, m: Math.round(DECOR_MAX * 100) })}</p>` : '';
+    return cats + note + roads + `<div class="grid">${Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].buildable !== false && BUILDINGS[k].cat === buildCat).map((k) => {
       const d = BUILDINGS[k];
       const built = s.buildings.filter((b) => b.type === k).length;
       const done = !!d.unique && built > 0;
@@ -149,7 +153,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       return `<div class="card ${ok ? '' : 'dim'}">
         <div class="card-img">${img(buildingIcon(k), 'bimg')}</div>
         <div class="card-main"><b>${t('b.' + k)}</b> <small>${t('ui.owned', { n: built })}</small>
-        <div class="desc">${t('bd.' + k)}</div>${comboTags(s, k)}
+        <div class="desc">${t('bd.' + k)}</div>${comboTags(s, k)}${goodsTags(s, k)}
         <div>${done ? t('ui.uniqueBuilt') : costHtml(s, buildCost(s, k))}</div>
         <div class="meta">${t('ui.size', { n: d.size })} · ${t('ui.attraction')} ${d.attraction}${d.price ? ` · ${t('ui.price')} ${d.price}` : ''}${hoursText(k)}</div></div>
         ${done ? '' : btn('place:' + k, t('ui.build'), { disabled: !ok })}
@@ -187,13 +191,13 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       <div class="row click" data-act="select:npc:${n.id}">${img(humanIcon(n.role, n.cls, n.look), 'pimg')}
         <span class="grow"><b>${esc(nameOf(n))}</b> <small>${roleLabel(n)}</small> ${n.role !== 'civilian' ? t('ui.lv', { lv: n.level }) : ''}
         <br><small>${t(statusKey(n))}${debuffs(n).map((d) => ` <span class="bad">${t('debuff.' + d)}</span>`).join('')}</small></span>
-        ${n.role === 'fighter' ? bar(n.hp / maxHp(n), 'hp') : ''}
+        ${n.role === 'fighter' ? bar(n.hp / maxHp(s, n), 'hp') : ''}
       </div>`).join('');
   },
 
   guild(c) {
     const s = c.s;
-    let h = '';
+    let h = commissionsHtml(s);
     const boss = currentBoss(s);
     if (boss) {
       const st = monsterStats(s, boss.type, boss);
@@ -203,7 +207,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
         <small>${t('ui.bossInfo', { n: rally, d: Math.max(0, Math.ceil(((boss.until ?? 0) - s.time) / DAY)) })}</small></span></div>`;
     }
     if (s.merchant) {
-      h += `<h3>${t('ui.merchant')}</h3><p class="meta">${t('ui.merchantHint', { d: Math.max(0, Math.ceil((s.merchant.until - s.time) / DAY)) })}</p>`;
+      h += `<h3>${t(s.merchant.foreign ? 'ui.caravan' : 'ui.merchant')}</h3><p class="meta">${t('ui.merchantHint', { d: Math.max(0, Math.ceil((s.merchant.until - s.time) / DAY)) })}</p>`;
       h += s.merchant.offers.map((o, i) => `<div class="row ${o.sold ? 'dim' : ''}">${img(itemIcon(o.item), 'ic big')}<span class="grow">${t('item.' + o.item)} ×${o.count}</span>
         ${o.sold ? `<small>${t('ui.sold')}</small>` : `${money(o.price, s.money >= o.price)} ${btn('buy:' + i, t('ui.buy'), { disabled: s.money < o.price })}`}</div>`).join('');
     }
@@ -267,18 +271,26 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
   forge(c) {
     const s = c.s;
     if (!s.buildings.some((b) => b.type === 'forge')) return `<p>${t('ui.needForge')}</p>`;
-    return `<p class="meta">${t('ui.forgeHint')}</p>` + forgeableWeapons(s).map((k) => {
-      const w = EQUIP.weapon.find((e) => e.key === k)!;
-      const L = s.wlv[k] ?? 0;
-      const fc = forgeCost(s, k);
-      const have = s.items[fc.mat] ?? 0;
-      const ok = s.money >= fc.money && have >= fc.count;
-      const users = s.npcs.filter((n) => n.weapon === k).length;
-      return `<div class="row"><span class="grow"><b>${t('eq.' + k)}</b> +${L}
-        <br><small>${t('ui.atk')} ${w.atk} → ${(w.atk * forgeMult(L)).toFixed(1)} · ${t('ui.users', { n: users })}</small>
-        <br>${money(fc.money, s.money >= fc.money)} <span class="cost ${have >= fc.count ? '' : 'bad'}">${img(itemIcon(fc.mat))}${t('item.' + fc.mat)} ${fmt(have)}/${fmt(fc.count)}</span></span>
-        ${btn('forge:' + k, t('ui.forge'), { disabled: !ok })}</div>`;
-    }).join('');
+    const slots: Slot[] = ['weapon', 'armor', 'accessory'];
+    const stat = (k: string, L: number) => {
+      const e = equipByKey(k)!, f = forgeMult(L), parts: string[] = [];
+      if (e.atk) parts.push(`${t('ui.atk')} ${e.atk} → ${(e.atk * f).toFixed(1)}`);
+      if (e.def) parts.push(`${t('ui.def')} ${e.def} → ${(e.def * f).toFixed(1)}`);
+      if (e.hp) parts.push(`HP ${e.hp} → ${Math.round(e.hp * f)}`);
+      return parts.join(' · ');
+    };
+    return `<p class="meta">${t('ui.forgeHint')}</p>${effectTag(s, 'smith')}<div class="btns">${slots.map((k) => btn('forgeSlot:' + k, t('slot.' + k), { cls: forgeSlot === k ? 'on' : '' })).join('')}</div>` +
+      (forgeable(s, forgeSlot).map((k) => {
+        const L = s.wlv[k] ?? 0;
+        const fc = forgeCost(s, k);
+        const have = s.items[fc.mat] ?? 0;
+        const ok = s.money >= fc.money && have >= fc.count;
+        const users = s.npcs.filter((n) => n[forgeSlot] === k).length;
+        return `<div class="row"><span class="grow"><b>${t('eq.' + k)}</b> +${L}
+          <br><small>${stat(k, L)} · ${t('ui.users', { n: users })}</small>
+          <br>${money(fc.money, s.money >= fc.money)} <span class="cost ${have >= fc.count ? '' : 'bad'}">${img(itemIcon(fc.mat))}${s.disc.includes(fc.mat) ? t('item.' + fc.mat) : t('ui.unknown')} ${fmt(have)}/${fmt(fc.count)}</span></span>
+          ${btn('forge:' + k, t('ui.forge'), { disabled: !ok })}</div>`;
+      }).join('') || `<p class="meta">${t('ui.forgeNone')}</p>`);
   },
 
   storage(c) {
@@ -304,6 +316,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     const sc = s.score ?? computeScore(s);
     const ec = expansionCost(s);
     let h = `<div class="box"><b>${t(`village.${s.village}.name`)}</b><div class="desc">${t(`village.${s.village}.desc`)}</div></div>`;
+    h += fameHtml(s);
     h += `<div class="kv"><span>${t('ui.attraction')}</span><b>${fmt(attraction(s))}</b>
       <span>${t('ui.population')}</span><b>${res.length}</b>
       <span>${t('ui.lastIncome')}</span><b>${fmt(s.stats.lastIncome)}</b>
@@ -350,8 +363,8 @@ export function scoreTable(sc: NonNullable<GameState['score']>) {
 
 function infoCard(c: Ctl): string {
   const s = c.s, sel = c.selected!;
-  const head = (icon: string, title: string, sub: string) =>
-    `<div class="win-title">${icon}<span class="grow"><b>${title}</b> <small>${sub}</small></span>${btn('deselect', '✕', { cls: 'x' })}</div>`;
+  const head = (icon: string, title: string, sub: string, extra = '') =>
+    `<div class="win-title">${icon}<span class="grow"><b>${title}</b> <small>${sub}</small></span>${extra}${btn('deselect', '✕', { cls: 'x' })}</div>`;
   if (sel.kind === 'bld') {
     const b = bld(s, sel.id);
     if (!b) return '';
@@ -385,13 +398,15 @@ function infoCard(c: Ctl): string {
     if (n.role === 'fighter') {
       for (const slot of ['weapon', 'armor', 'accessory'] as const) {
         const e = equipByKey(n[slot]);
-        body += `<span>${t('slot.' + slot)}</span><b>${e ? t('eq.' + e.key) + (slot === 'weapon' && s.wlv[e.key] ? ` +${s.wlv[e.key]}` : '') : '-'}</b>`;
+        body += `<span>${t('slot.' + slot)}</span><b>${e ? t('eq.' + e.key) + (s.wlv[e.key] ? ` +${s.wlv[e.key]}` : '') : '-'}</b>`;
       }
       const q = s.quests.find((q) => q.id === n.quest);
       if (q) body += `<span>${t('ui.quest')}</span><b>${t('ui.questText', { c: q.need, m: '@m.' + q.type })}</b>`;
       body += `<span>${t('ui.kills')}</span><b>${fmt(n.kills)}</b>`;
       const mate = npcById(s, n.spouse ?? n.partner ?? null);
       if (mate) body += `<span>${t(n.spouse != null ? 'ui.spouse' : 'ui.partner')}</span><b><a data-act="select:npc:${mate.id}">${esc(npcName(mate.name))}</a></b>`;
+      const rival = npcById(s, n.rival ?? null);
+      if (rival) body += `<span>${t('ui.rival')}</span><b><a data-act="select:npc:${rival.id}">${esc(npcName(rival.name))}</a> <small>${t('ui.lv', { lv: rival.level })} · ${t('ui.rivalKills', { a: n.kills, b: rival.kills })}</small></b>`;
       if (n.titles?.length) {
         const tb = titleBonus(n);
         body += `<span>${t('ui.titles')}</span><b>${n.titles.map((k) => t('title.' + k)).join('、')}<br><small>${t('ui.titleBonus', { a: Math.round((tb.atk - 1) * 100), d: Math.round((tb.def - 1) * 100), h: Math.round((tb.hp - 1) * 100) })}</small></b>`;
@@ -402,9 +417,13 @@ function infoCard(c: Ctl): string {
     body += '</div>';
     const db = debuffs(n);
     if (db.length) body += `<div>${db.map((d) => `<span class="tag bad">${t('debuff.' + d)}: ${t('debuffd.' + d)}</span>`).join('')}</div>`;
+    if (n.bio?.length) body += `<h3>${t('ui.story')}</h3><ul class="bio">${[...n.bio].reverse().map((e) => `<li><span class="log-date">${t('ui.dayShort', { y: Math.floor(e.t / DAYS_PER_YEAR) + 1, m: Math.floor((e.t % DAYS_PER_YEAR) / DAYS_PER_MONTH) + 1 })}</span> ${esc(t(e.k, e.p))}</li>`).join('')}</ul>`;
   }
+  if (n.vip) body += `<p class="meta">${t('vipd.' + n.vip)}</p>`;
+  const following = c.follow === n.id;
+  const followBtn = btn('follow:' + n.id, following ? t('ui.unfollow') : t('ui.follow'), { cls: 'sm ' + (following ? 'on' : '') });
   const sub = `${roleLabel(n)}${n.role !== 'civilian' && n.role !== 'tourist' ? ' ' + t('ui.lv', { lv: n.level }) : ''}`;
-  return head(img(humanIcon(n.role, n.cls, n.look), 'pimg'), esc(nameOf(n)), sub) + `<div class="win-body">${body}</div>`;
+  return head(img(humanIcon(n.role, n.cls, n.look), 'pimg'), esc(nameOf(n)), sub, followBtn) + `<div class="win-body">${body}</div>`;
 }
 
 function buildingBody(c: Ctl, b: Building): string {
@@ -426,7 +445,16 @@ function buildingBody(c: Ctl, b: Building): string {
     if (next) h += `<p class="meta">${t('ui.nextStock', { e: '@eq.' + next.key, lv: SHOP_TIER_LEVELS[tier] })}</p>`;
   }
   const cs = combosOf(s, b);
-  if (cs.length) h += `<div>${cs.map((x) => `<span class="tag good">${t('combo.' + x.key)} +${Math.round(x.income * 100)}%</span>`).join('')}</div>`;
+  const db = decorBonus(s, b);
+  if (cs.length || db) h += `<div>${cs.map((x) => `<span class="tag good">${t('combo.' + x.key)} +${Math.round(x.income * 100)}%</span>`).join('')}${db ? `<span class="tag good">${t('ui.decorBonus', { p: Math.round(db * 100) })}</span>` : ''}</div>`;
+  if (d.goods) {
+    const cur = goodsItem(s, b);
+    const list = d.goods.map((i) => s.disc.includes(i)
+      ? `<span class="tag ${cur === i ? 'good' : ''}">${img(itemIcon(i))}${t('item.' + i)} ${fmt(s.items[i] ?? 0)} <small>+${goodsPrice(i)}</small></span>`
+      : `<span class="tag">${t('ui.unknown')}</span>`).join('');
+    h += `<h3>${t('ui.goods')}</h3><div>${list}</div><p class="meta">${t(b.goodsOff ? 'ui.goodsOff' : cur ? 'ui.goodsOn' : 'ui.goodsEmpty')}</p>
+      <div class="btns">${btn('goods:' + b.id, b.goodsOff ? t('ui.goodsEnable') : t('ui.goodsDisable'))}</div>`;
+  }
   if (d.kind === 'guild') h += `<div class="btns">${btn('tab:guild', t('tab.guild'))}</div>`;
   if (d.kind === 'forge') h += `<div class="btns">${btn('tab:forge', t('tab.forge'))}</div>`;
   const uc = upgradeCost(b);
@@ -508,6 +536,8 @@ export function reportHtml(s: GameState, i: number): string {
     ${row('ui.population', fmt(r.residents))}${row('score.buildings', fmt(r.buildings))}${row('ui.rBosses', fmt(r.bosses))}${row('ui.rExpeditions', fmt(r.expeditions))}</div>
     ${r.star ? `<p>⭐ ${t('ui.rStar', { n: npcName(r.star.name), c: '@cls.' + r.star.cls, k: r.star.kills, lv: r.star.level })}</p>` : ''}
     ${r.shop ? `<p>🏆 ${t('ui.rShop', { b: '@b.' + r.shop.type, v: r.shop.income })}</p>` : ''}
+    ${r.rank != null ? `<p>📜 ${t('ui.rFame', { r: `@fame.${r.rank}`, v: r.fame ?? 0, c: r.commissions ?? 0 })}</p>` : ''}
+    ${r.rival ? `<p>⚔ ${t('ui.rRival', { a: npcName(r.rival.a), b: npcName(r.rival.b), ak: r.rival.ak, bk: r.rival.bk, al: r.rival.al, bl: r.rival.bl })}</p>` : ''}
     ${events ? `<h3>${t('ui.rEvents')}</h3><ul class="news">${events}</ul>` : ''}
     <div class="btns center">${btn('reportShare:' + i, t('ui.shareImage'), { cls: 'primary' })}${btn('closeModal', t('ui.close'))}</div></div></div>`;
 }
@@ -516,4 +546,42 @@ function comboTags(s: GameState, type: string): string {
   const list = COMBOS.filter((c) => c.members.includes(type));
   if (!list.length) return '';
   return `<div>${list.map((c) => `<span class="tag">${s.comboSeen.includes(c.key) ? t('combo.' + c.key) : t('ui.unknown')}</span>`).join('')}</div>`;
+}
+
+let forgeSlot: Slot = 'weapon';
+export const setForgeSlot = (k: string) => { forgeSlot = k as Slot; };
+
+function effectTag(s: GameState, k: string): string {
+  const e = s.effects.find((x) => x.k === k && x.until > s.time);
+  return e ? `<p class="good">${t('eff.' + k)} · ${t('ui.daysLeft', { n: Math.ceil((e.until - s.time) / DAY) })}</p>` : '';
+}
+
+function goodsTags(s: GameState, type: string): string {
+  const g = BUILDINGS[type].goods;
+  if (!g) return '';
+  return `<div class="meta">${t('ui.goods')}: ${g.map((i) => (s.disc.includes(i) ? img(itemIcon(i)) : '?')).join('')}</div>`;
+}
+
+function commissionsHtml(s: GameState): string {
+  const left = Math.max(0, seasonEnds(s) - s.day);
+  const rows = s.commissions.map((c) => {
+    const p = Math.min(c.need, progress(s, c));
+    const reward = [money(c.money), c.item ? `<span class="cost">${img(itemIcon(c.item))}${s.disc.includes(c.item) ? t('item.' + c.item) : t('ui.unknown')} ×${c.count}</span>` : '', `<span class="cost">${t('ui.fameShort', { v: c.fame })}</span>`].join(' ');
+    return `<div class="row ${c.done ? 'dim' : ''}"><span class="grow"><b>${param(commissionText(c))}</b>${c.done ? ` <small class="good">${t('ui.done')}</small>` : ''}
+      <br>${bar(p / c.need)} ${fmt(p)}/${fmt(c.need)}<br><small>${t('ui.reward')}:</small> ${reward}</span></div>`;
+  }).join('');
+  return `<h3>${t('ui.commissions')}</h3><p class="meta">${t('ui.commissionHint', { d: left })}</p>${rows || `<p class="meta">${t('ui.none')}</p>`}`;
+}
+
+function fameHtml(s: GameState): string {
+  const r = fameRank(s.fame);
+  const next = FAME_RANKS[r + 1];
+  const f = next ? (s.fame - FAME_RANKS[r]) / (next - FAME_RANKS[r]) : 1;
+  const vips = VIPS.map(([k, need]) => r >= need
+    ? `<span class="tag ${s.vips.includes(k) ? 'good' : ''}" title="${t('vipd.' + k)}">${t('vipn.' + k)}</span>`
+    : `<span class="tag dim">${t('ui.fameUnlock', { r: `@fame.${need}` })}</span>`).join('');
+  return `<h3>${t('ui.fame')}</h3><div class="kv"><span>${t('ui.fameRank')}</span><b>${t('fame.' + r)}</b>
+    <span>${t('ui.fame')}</span><b>${fmt(s.fame)}${next ? ` / ${fmt(next)}` : ''}<br>${bar(f, 'fam')}</b>
+    <span>${t('ui.famePerk')}</span><b>${t('ui.famePerkText', { p: Math.round(6 * r) })}</b></div>
+    <p class="meta">${t('ui.fameHint')}</p><div class="tags">${vips}</div>${effectTag(s, 'sage')}${effectTag(s, 'smith')}`;
 }

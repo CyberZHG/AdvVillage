@@ -174,3 +174,7 @@ img.bimg.xs { width: 26px; margin-right: 2px; }
 .paper .kv > span, .paper .meta, .paper small { color: #7a6a50; }
 .paper h3 { color: #8a3a2a; border-color: #c8b890; }
 ul.news { margin: 4px 0; padding-left: 18px; line-height: 1.5; }
+.bio { list-style: none; margin: 4px 0; padding: 0; max-height: 170px; overflow-y: auto; font-size: 12px; }
+.bio li { padding: 2px 0; border-bottom: 1px dotted rgba(255, 255, 255, 0.12); }
+.tag.dim { opacity: 0.5; }
+.btn.sm { padding: 1px 6px; font-size: 12px; margin-right: 4px; }

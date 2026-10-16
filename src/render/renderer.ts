@@ -39,6 +39,7 @@ export class Renderer {
   focusFighters = false;
   get view() { return this.low; }
   selected: Sel = null;
+  follow: number | null = null;
   dpr = 1;
 
   constructor(canvas: HTMLCanvasElement) {
@@ -55,6 +56,17 @@ export class Renderer {
   }
 
   defaultZoom() { return Math.max(2, Math.round((window.innerWidth < 700 ? 1.3 : 2) * this.dpr)); }
+
+  // the camera glides after the followed resident while they are out in the open
+  private followTick(s: GameState) {
+    if (this.follow == null) return;
+    const n = s.npcs.find((o) => o.id === this.follow);
+    if (!n) { this.follow = null; return; }
+    if (n.inside != null || n.state === 'away') return;
+    const tx = (n.x - n.y) * 16, ty = (n.x + n.y) * 8;
+    this.cam.x += (tx - this.cam.x) * 0.12;
+    this.cam.y += (ty - this.cam.y) * 0.12;
+  }
 
   centerOn(tx: number, ty: number) {
     this.cam.x = (tx - ty) * 16;
@@ -120,6 +132,7 @@ export class Renderer {
 
   render(s: GameState, time: number) {
     this.lastTime = time;
+    this.followTick(s);
     if (this.emotes.size > 400) this.emotes.clear();
     this.buildGround(s);
     const z = this.cam.zoom;
@@ -267,9 +280,11 @@ export class Renderer {
         }
         if (fighter && n.state !== 'down') {
           const by = py - sp.ay - 3;
-          this.hpBar(px + 2, by, n.hp / maxHpCached(n), '#4ad06a');
+          this.hpBar(px + 2, by, n.hp / maxHp(s, n), '#4ad06a');
           this.badge(px - 7, by + 1, CLASS_COLOR[n.cls]);
         }
+        if (n.vip) this.vipMark(px, py - sp.ay - (fighter ? 7 : 3), time);
+        if (this.follow === n.id) this.followMark(px, py);
         if (n.state === 'wait' && n.goal === 'camp') this.campfire(px + 8, py, time);
         const em = this.emotes.get(n.id);
         if (em && time - em.t < 2.2) drawEmote(ctx, em.k, px, py - sp.ay - (fighter ? 6 : 1));
@@ -293,6 +308,21 @@ export class Renderer {
     ctx.fillRect(px + 3, py + 1, 2, 1);
     ctx.fillRect(px - 6, py, 1, 1);
     ctx.fillRect(px + 5, py, 1, 1);
+  }
+
+  private vipMark(px: number, py: number, time: number) {
+    const ctx = this.lctx;
+    const y = Math.round(py - 2 + Math.sin(time * 3) * 1);
+    ctx.fillStyle = '#5a3a10';
+    ctx.fillRect(px - 2, y - 1, 5, 3); ctx.fillRect(px - 1, y - 2, 3, 5);
+    ctx.fillStyle = '#ffd34a';
+    ctx.fillRect(px - 1, y, 3, 1); ctx.fillRect(px, y - 1, 1, 3);
+  }
+
+  private followMark(px: number, py: number) {
+    const ctx = this.lctx;
+    ctx.fillStyle = '#ffffff';
+    for (const [dx, dy] of [[-6, -1], [6, -1], [-6, 1], [6, 1]]) ctx.fillRect(px + dx - (dx < 0 ? 0 : 1), py + dy, 2, 1);
   }
 
   private badge(px: number, py: number, color: string) {
@@ -416,7 +446,6 @@ export class Renderer {
   }
 }
 
-const maxHpCached = (n: Npc) => maxHp(n);
 
 const shinyCache = new Map<string, Sprite>();
 function shinySprite(sp: Sprite, key: string): Sprite {

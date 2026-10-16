@@ -1,4 +1,4 @@
-import { BUILDINGS } from './data';
+import { BUILDINGS, DECOR_MAX, DECOR_RADIUS, DECOR_STEP } from './data';
 import type { Building, GameState } from './types';
 
 export interface ComboDef { key: string; members: string[]; income: number; appeal: number }
@@ -17,6 +17,13 @@ export const COMBOS: ComboDef[] = [
   { key: 'adventurersRow', members: ['guild', 'tavern', 'inn'], income: 0.2, appeal: 6 },
   { key: 'colosseum', members: ['arena', 'restaurant', 'tavern'], income: 0.25, appeal: 8 },
   { key: 'residential', members: ['house', 'house', 'house', 'fountain'], income: 0.3, appeal: 3 },
+  { key: 'plaza', members: ['fountain', 'bench', 'lamppost'], income: 0, appeal: 9 },
+  { key: 'garden', members: ['gazebo', 'hedge', 'flowerbed'], income: 0, appeal: 12 },
+  { key: 'farmstead', members: ['windmill', 'well', 'bakery'], income: 0.3, appeal: 6 },
+  { key: 'nightStreet', members: ['tavern', 'lamppost', 'lamppost'], income: 0.2, appeal: 4 },
+  { key: 'lakeside', members: ['teahouse', 'pond', 'bench'], income: 0.25, appeal: 6 },
+  { key: 'romance', members: ['cafe', 'flowerArch', 'pond'], income: 0.2, appeal: 7 },
+  { key: 'townCenter', members: ['clockTower', 'guild', 'fountain'], income: 0.2, appeal: 14 },
 ];
 export const COMBO_RADIUS = 5;
 
@@ -31,6 +38,7 @@ export interface ActiveCombo { key: string; ids: number[] }
 let cacheKey = '';
 let cache: ActiveCombo[] = [];
 const memberOf = new Map<number, ComboDef[]>();
+const decorOf = new Map<number, number>();
 
 // a building can belong to several combos but only to one instance of each
 export function activeCombos(s: GameState): ActiveCombo[] {
@@ -39,6 +47,14 @@ export function activeCombos(s: GameState): ActiveCombo[] {
   cacheKey = key;
   cache = [];
   memberOf.clear();
+  decorOf.clear();
+  const decor = s.buildings.filter((b) => BUILDINGS[b.type].kind === 'decor');
+  for (const b of s.buildings) {
+    if (!BUILDINGS[b.type].price) continue;
+    const p = center(b);
+    const n = decor.filter((d) => { const q = center(d); return Math.max(Math.abs(p.x - q.x), Math.abs(p.y - q.y)) <= DECOR_RADIUS + BUILDINGS[b.type].size / 2; }).length;
+    if (n) decorOf.set(b.id, Math.min(DECOR_MAX, n * DECOR_STEP));
+  }
   for (const c of COMBOS) {
     const used = new Set<number>();
     for (const anchor of s.buildings.filter((b) => b.type === c.members[0])) {
@@ -62,7 +78,13 @@ export function combosOf(s: GameState, b: Building): ComboDef[] {
   return memberOf.get(b.id) ?? [];
 }
 
-export const comboIncome = (s: GameState, b: Building) => 1 + combosOf(s, b).reduce((a, c) => a + c.income, 0);
+// income bonus a business gets from decorations standing within DECOR_RADIUS of it
+export function decorBonus(s: GameState, b: Building): number {
+  activeCombos(s);
+  return decorOf.get(b.id) ?? 0;
+}
+
+export const comboIncome = (s: GameState, b: Building) => 1 + combosOf(s, b).reduce((a, c) => a + c.income, 0) + decorBonus(s, b);
 export const comboAppeal = (s: GameState) => activeCombos(s).reduce((a, c) => a + COMBOS.find((d) => d.key === c.key)!.appeal, 0);
 
 export function discoverCombos(s: GameState): string[] {

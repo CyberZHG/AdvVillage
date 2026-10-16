@@ -11,7 +11,7 @@ import type { Building, Cls, GameState, LogParam, Monster, Npc, ResNode, Role } 
 export const NAME_POOL = 128;
 
 export const newId = (s: GameState) => s.nextId++;
-export const emptyYear = (): GameState['ys'] => ({ income: 0, kills: 0, tourists: 0, quests: 0, expeditions: 0, bosses: 0, shinies: 0, events: [] });
+export const emptyYear = (): GameState['ys'] => ({ income: 0, kills: 0, tourists: 0, quests: 0, expeditions: 0, bosses: 0, shinies: 0, commissions: 0, fame: 0, events: [] });
 export const mods = (s: GameState) => villageMods(s.village);
 export const bld = (s: GameState, id: number | null) => (id == null ? undefined : s.buildings.find((b) => b.id === id));
 export const npcById = (s: GameState, id: number | null) => (id == null ? undefined : s.npcs.find((n) => n.id === id));
@@ -22,12 +22,27 @@ export const isNight = (s: GameState) => tod(s) >= NIGHT_START || tod(s) < MORNI
 export const year = (s: GameState) => Math.floor(s.day / 120) + 1;
 export const residents = (s: GameState) => s.npcs.filter((n) => n.role !== 'tourist');
 
-const NOTABLE = /^(ev\.(?!merchantLeft)|log\.(bossDown|shiny|married|child|combo|expanded|achievement|title|expReturn|score))/;
+const NOTABLE = /^(ev\.(?!merchantLeft)|vip\.|log\.(bossDown|shiny|married|child|combo|expanded|achievement|title|expReturn|score|commission|fameRank|rival|overtook))/;
 
 export function log(s: GameState, k: string, p?: Record<string, LogParam>) {
   s.log.push({ t: s.day, k, p });
   if (s.ys && NOTABLE.test(k)) { s.ys.events.push({ t: s.day, k, p }); if (s.ys.events.length > 30) s.ys.events.shift(); }
   if (s.log.length > 120) s.log.splice(0, s.log.length - 120);
+}
+
+// a short line for the toast; the main loop shows the newest one and drops the rest
+export function note(s: GameState, k: string, p?: Record<string, LogParam>) {
+  s.notes.push({ t: s.day, k, p });
+  if (s.notes.length > 5) s.notes.shift();
+}
+
+const BIO_CAP = 30;
+// personal history shown on the resident card; the first entry (arrival) is always kept
+export function bio(s: GameState, n: Npc, k: string, p?: Record<string, LogParam>) {
+  if (n.role === 'tourist') return;
+  const b = (n.bio ??= []);
+  b.push({ t: s.day, k, p });
+  if (b.length > BIO_CAP) b.splice(1, 1);
 }
 
 export function fx(s: GameState, kind: GameState['fx'][number]['kind'], x: number, y: number, v: string | number) {
@@ -56,17 +71,20 @@ export function makeNpc(s: GameState, role: Role, x: number, y: number, level = 
     timer: 0, cd: 0, facing: 1, weapon: null, armor: null, accessory: null, bag: {}, quest: null,
     carry: null, rescuer: null, downT: 0, repath: 0, profile: -1, plan: [], noFood: 0, kills: 0,
   };
+  if (role !== 'tourist') n.bio = [{ t: s.day, k: 'bio.joined' }];
   if (role === 'fighter') { n.weapon = EQUIP.weapon[0].key; n.armor = EQUIP.armor[0].key; }
-  n.hp = maxHp(n);
+  n.hp = maxHp(s, n);
   return n;
 }
 
-export function maxHp(n: Npc): number {
+const forged = (s: GameState, key: string | null) => forgeMult(key ? s.wlv[key] ?? 0 : 0);
+
+export function maxHp(s: GameState, n: Npc): number {
   if (n.role !== 'fighter') return 40 + 5 * n.level;
   const c = CLASSES[n.cls];
   let hp = c.hp + c.hpG * n.level;
-  hp += equipByKey(n.armor)?.hp ?? 0;
-  hp += equipByKey(n.accessory)?.hp ?? 0;
+  hp += (equipByKey(n.armor)?.hp ?? 0) * forged(s, n.armor);
+  hp += (equipByKey(n.accessory)?.hp ?? 0) * forged(s, n.accessory);
   hp *= titleBonus(n).hp;
   return Math.round(hp);
 }
@@ -76,16 +94,23 @@ export interface Stats { maxHp: number; atk: number; def: number; range: number;
 export function fighterStats(s: GameState, n: Npc): Stats {
   const c = CLASSES[n.cls];
   let atk = c.atk + c.atkG * n.level, def = c.def + c.defG * n.level;
-  const w = equipByKey(n.weapon);
-  if (w) atk += w.atk * forgeMult(s.wlv[w.key] ?? 0);
-  atk += equipByKey(n.accessory)?.atk ?? 0;
-  def += equipByKey(n.armor)?.def ?? 0;
+  atk += (equipByKey(n.weapon)?.atk ?? 0) * forged(s, n.weapon);
+  atk += (equipByKey(n.accessory)?.atk ?? 0) * forged(s, n.accessory);
+  def += (equipByKey(n.armor)?.def ?? 0) * forged(s, n.armor);
   let m = 1;
   if (n.home == null) m *= 0.85;
   if (n.hunger < 20) m *= 0.75;
   if (n.mood > 70) m *= 1.05;
+  if (rivalNear(s, n)) m *= 1.1;
   const tb = titleBonus(n);
-  return { maxHp: maxHp(n), atk: atk * m * tb.atk, def: def * m * tb.def, range: c.range, interval: c.interval };
+  return { maxHp: maxHp(s, n), atk: atk * m * tb.atk, def: def * m * tb.def, range: c.range, interval: c.interval };
+}
+
+// a rival fighting close by spurs both of them on
+export function rivalNear(s: GameState, n: Npc): boolean {
+  if (n.rival == null || (n.state !== 'fight' && n.state !== 'hunt')) return false;
+  const r = npcById(s, n.rival);
+  return !!r && (r.state === 'fight' || r.state === 'hunt') && Math.abs(r.x - n.x) + Math.abs(r.y - n.y) < 8;
 }
 
 // bosses carry their own level and a much larger health pool
@@ -140,13 +165,15 @@ export function spawnNode(s: GameState, kind?: NodeKind, near = false) {
 
 export function newGame(village: string): GameState {
   const s: GameState = {
-    v: 2, village, vlv: 0, roads: [], time: DAY * 0.05, day: 0, money: 4000,
+    v: 3, village, vlv: 0, roads: [], time: DAY * 0.05, day: 0, money: 4000,
     items: { wood: 40, stone: 30, fruit: 30, meat: 0 },
     buildings: [], nodes: [], monsters: [], npcs: [], profiles: [], quests: [], exp: null,
     mlv: {}, wlv: {}, disc: ['wood', 'stone', 'fruit'], seen: [], nextId: 1, log: [], scored: false, score: null,
-    timers: { spawn: 0, node: 0, rescue: 0 }, stats: { income: 0, lastIncome: 0, kills: 0, tourists: 0, quests: 0, rescues: 0, expeditions: 0, expLocs: [] },
+    timers: { spawn: 0, node: 0, rescue: 0 },
+    stats: { income: 0, lastIncome: 0, kills: 0, tourists: 0, quests: 0, rescues: 0, expeditions: 0, expLocs: [], earned: 0, commissions: 0, goods: 0, fk: {} },
     comboSeen: [], weather: 'clear', effects: [], bonds: {}, couples: [], reports: [], ys: emptyYear(), shinySeen: [],
     merchant: null, nextBoss: 40, fx: [],
+    fame: 0, commissions: [], cseason: -1, rivals: [], nextVip: 45, vips: [], notes: [],
   };
   const m = villageMods(village);
   for (const [k, d] of Object.entries(MONSTERS)) s.mlv[k] = { level: d.base + m.monsterLevel, exp: 0 };

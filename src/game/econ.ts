@@ -1,6 +1,7 @@
 import { DAY, EXPANSIONS } from './constants';
 import { comboIncome, discoverCombos } from './combos';
-import { ROAD_COST, BUILDINGS, EQUIP, EXPEDITIONS, shopTier, type Cost } from './data';
+import { ROAD_COST, BUILDINGS, EQUIP, EXPEDITIONS, ITEMS, equipByKey, shopTier, type Cost, type Slot } from './data';
+import { hasEffect } from './events';
 import { bldExpNeed, gainExp } from './level';
 import { assignHousing, fx, log, mods, newId, ofKind, residents, year } from './state';
 import { doorOf, invalidateGrid, covers, placement, setRoad, syncBounds, villageDist } from './world';
@@ -10,6 +11,7 @@ export function earn(s: GameState, b: Building, amount: number) {
   amount = Math.max(1, Math.round(amount * comboIncome(s, b)));
   s.money += amount;
   s.stats.income += amount;
+  s.stats.earned += amount;
   s.ys.income += amount;
   b.yi = (b.yi ?? 0) + amount;
   const before = b.level;
@@ -20,6 +22,14 @@ export function earn(s: GameState, b: Building, amount: number) {
   const d = doorOf(b);
   fx(s, 'coin', d.x - 0.5, d.y - 0.5, amount);
 }
+
+// the specialty a sale would use right now, if the building has one in stock
+export function goodsItem(s: GameState, b: Building): string | null {
+  const g = BUILDINGS[b.type].goods;
+  if (!g || b.goodsOff) return null;
+  return g.find((i) => (s.items[i] ?? 0) > 0) ?? null;
+}
+export const goodsPrice = (item: string) => ITEMS[item].value * 2;
 
 export const hasCost = (s: GameState, c: Cost) =>
   s.money >= c.money && (s.items.wood ?? 0) >= (c.wood ?? 0) && (s.items.stone ?? 0) >= (c.stone ?? 0);
@@ -118,10 +128,10 @@ export function expand(s: GameState): boolean {
 }
 
 export function forgeCost(s: GameState, key: string) {
-  const w = EQUIP.weapon.find((e) => e.key === key)!;
+  const e = equipByKey(key)!;
   const L = s.wlv[key] ?? 0;
-  const m = mods(s).forgeCost;
-  return { money: Math.round(w.price * 0.3 * (1 + L) * m), mat: w.mat!, count: Math.round((2 + 2 * Math.floor(Math.sqrt(L))) * m) || 1 };
+  const m = mods(s).forgeCost * (hasEffect(s, 'smith') ? 0.5 : 1);
+  return { money: Math.round(e.price * 0.3 * (1 + L) * m), mat: e.mat, count: Math.max(1, Math.round((2 + 2 * Math.floor(Math.sqrt(L))) * m)) };
 }
 
 export const canForge = (s: GameState, key: string, money: number) => {
@@ -142,10 +152,11 @@ export function forgeUpgrade(s: GameState, key: string, payer: 'village' | { mon
   return true;
 }
 
-export function forgeableWeapons(s: GameState): string[] {
-  const tier = Math.max(0, ...ofKind(s, 'shop').filter((b) => BUILDINGS[b.type].slot === 'weapon').map((b) => shopTier(b.level)));
-  const owned = new Set(s.npcs.map((n) => n.weapon));
-  return EQUIP.weapon.filter((w) => w.tier <= tier || owned.has(w.key)).map((w) => w.key);
+// gear the shops can sell today, plus anything a resident already wears
+export function forgeable(s: GameState, slot: Slot): string[] {
+  const tier = Math.max(0, ...ofKind(s, 'shop').filter((b) => BUILDINGS[b.type].slot === slot).map((b) => shopTier(b.level)));
+  const owned = new Set(s.npcs.map((n) => n[slot]));
+  return EQUIP[slot].filter((e) => e.tier <= tier || owned.has(e.key)).map((e) => e.key);
 }
 
 export function expeditionAvailable(s: GameState, key: string) {

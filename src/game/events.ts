@@ -58,16 +58,17 @@ const EVENTS: [string, number, EventFn][] = [
   }],
 ];
 
-function newMerchant(s: GameState) {
+// a foreign caravan brings more and rarer goods at a kinder price
+export function newMerchant(s: GameState, foreign = false) {
   const rare = Object.keys(ITEMS).filter((k) => !['wood', 'stone', 'fruit', 'meat', 'gel'].includes(k));
-  const pool = rare.filter((k) => ITEMS[k].value <= 30 + year(s) * 8);
-  const offers = Array.from({ length: 3 }, () => {
+  const pool = rare.filter((k) => ITEMS[k].value <= 30 + year(s) * (foreign ? 16 : 8));
+  const offers = Array.from({ length: foreign ? 5 : 3 }, () => {
     const item = pick(pool.length ? pool : rare);
     const count = randi(3, 8) + year(s);
-    return { item, count, price: Math.round(ITEMS[item].value * count * 2.5) };
+    return { item, count, price: Math.round(ITEMS[item].value * count * (foreign ? 1.6 : 2.5)) };
   });
-  s.merchant = { until: s.time + 4 * DAY, offers };
-  log(s, 'ev.merchant');
+  s.merchant = { until: s.time + (foreign ? 6 : 4) * DAY, offers, foreign };
+  if (!foreign) log(s, 'ev.merchant');
 }
 
 export function buyOffer(s: GameState, i: number): boolean {

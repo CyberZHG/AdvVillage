@@ -13,6 +13,7 @@ import { download, makeReportImage, makeShareImage, shareImage, toBlob } from '.
 import { buyOffer, currentBoss } from './game/events';
 import { build, canBuild, demolish, expand, forgeUpgrade, launchExpedition, placeRoad, removeRoad, upgrade } from './game/econ';
 import { bld } from './game/state';
+import { setForgeSlot } from './ui/ui';
 import {
   confirmHtml, importModalHtml, mountHud, reportHtml, shareModalHtml, pendingDemolish, resetHtmlCache, scoreModalHtml, setBuildCat, setPendingDemolish, titleHtml, updateHud,
   type Ctl, type Tab,
@@ -40,6 +41,7 @@ const ctl: Ctl = {
   get selected() { return renderer.selected; },
   get labels() { return renderer.labels; },
   get focus() { return renderer.focusFighters; },
+  get follow() { return renderer.follow; },
   act: (a: string, arg: string) => act(a + (arg ? ':' + arg : '')),
 };
 
@@ -161,6 +163,14 @@ function act(a: string) {
       break;
     }
     case 'forge': if (!forgeUpgrade(s!, x, 'village')) toast(t('ui.notEnough')); break;
+    case 'forgeSlot': setForgeSlot(x); break;
+    case 'follow': {
+      const id = Number(x);
+      renderer.follow = renderer.follow === id ? null : id;
+      if (renderer.follow != null && window.innerWidth < 900) tab = null;
+      break;
+    }
+    case 'goods': { const b = bld(s!, Number(x)); if (b) b.goodsOff = !b.goodsOff; break; }
     case 'expedition': if (launchExpedition(s!, x)) toast(t('log.expRecruit', { loc: '@ex.' + x })); break;
     case 'expand': if (!expand(s!)) toast(t('ui.notEnough')); break;
     case 'lang':
@@ -263,7 +273,7 @@ canvas.addEventListener('pointermove', (e) => {
   }
   if (paintFrom) { paintTo(e.clientX, e.clientY); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); return; }
   if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 6) dragging = true;
-  if (dragging) renderer.pan(e.clientX - prev.x, e.clientY - prev.y);
+  if (dragging) { renderer.follow = null; renderer.pan(e.clientX - prev.x, e.clientY - prev.y); }
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 });
 canvas.addEventListener('pointerup', (e) => {
@@ -319,6 +329,8 @@ function advance() {
   if (!scored && s.scored) onScored();
   if (s.reports.length > reports) toast(t('ui.reportIssued', { y: s.reports[s.reports.length - 1].year }));
   if (!hadBoss && currentBoss(s)) toast(t('ui.bossAlert'));
+  const note = s.notes.pop();
+  if (note) { toast(t(note.k, note.p)); s.notes.length = 0; }
 }
 
 let uiTimer = 0;
