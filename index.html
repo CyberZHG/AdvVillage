@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-ZZVQ0TB2S9"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      gtag('config', 'G-ZZVQ0TB2S9');
+    </script>
+    <meta name="msvalidate.01" content="900BFBEC9CA24BE1B56B696EF1CE3B2E" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="description" content="A pixel-art village builder: raise a village for adventurers and watch it run itself." />
+    <title>Adventurer Village</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Cpath fill='%233d5d9e' d='M8 1l7 6H1z'/%3E%3Cpath fill='%23cdb88c' d='M3 7h10v8H3z'/%3E%3Cpath fill='%236a4426' d='M7 10h3v5H7z'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DotGothic16&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="hud" class="hidden"></div>
+    <div id="title" class="hidden"></div>
+    <div id="modal" class="hidden"></div>
+    <div id="toast" class="hidden"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

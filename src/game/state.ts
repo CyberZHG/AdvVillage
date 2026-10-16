@@ -1,0 +1,160 @@
+import { CLASSES, EQUIP, MONSTERS, BUILDINGS, villageMods, equipByKey, type NodeKind } from './data';
+import { HOUSE_CAP, DAY, NIGHT_START, MORNING } from './constants';
+import { forgeMult, lvMult } from './level';
+import { pick, randi, weighted } from './util';
+import { baseRoads, inVillage, isRoad, randomZoneTile, syncBounds, syncRoads, villageDist, VB } from './world';
+import type { Building, Cls, GameState, LogParam, Look, Npc, ResNode, Role } from './types';
+
+export const NAME_POOL = 64;
+export const LOOKS = { skin: 3, hair: 6, cloth: 4, pants: 3 };
+
+export const newId = (s: GameState) => s.nextId++;
+export const mods = (s: GameState) => villageMods(s.village);
+export const bld = (s: GameState, id: number | null) => (id == null ? undefined : s.buildings.find((b) => b.id === id));
+export const npcById = (s: GameState, id: number | null) => (id == null ? undefined : s.npcs.find((n) => n.id === id));
+export const ofKind = (s: GameState, kind: string) => s.buildings.filter((b) => BUILDINGS[b.type].kind === kind);
+export const guild = (s: GameState) => s.buildings.find((b) => b.type === 'guild')!;
+export const tod = (s: GameState) => (s.time % DAY) / DAY;
+export const isNight = (s: GameState) => tod(s) >= NIGHT_START || tod(s) < MORNING;
+export const year = (s: GameState) => Math.floor(s.day / 120) + 1;
+export const residents = (s: GameState) => s.npcs.filter((n) => n.role !== 'tourist');
+
+export function log(s: GameState, k: string, p?: Record<string, LogParam>) {
+  s.log.push({ t: s.day, k, p });
+  if (s.log.length > 120) s.log.splice(0, s.log.length - 120);
+}
+
+export function fx(s: GameState, kind: GameState['fx'][number]['kind'], x: number, y: number, v: string | number) {
+  if (s.fx.length < 300) s.fx.push({ kind, x, y, v });
+}
+
+// prefer plain names; numbered variants ("Alden II") only once every base name is taken
+export function freshName(s: GameState): number {
+  const used = new Set([...s.npcs.map((n) => n.name), ...s.profiles.map((p) => p.name)]);
+  for (let gen = 0; gen < 8; gen++) {
+    const free = [];
+    for (let i = gen * NAME_POOL; i < (gen + 1) * NAME_POOL; i++) if (!used.has(i)) free.push(i);
+    if (free.length) return pick(free);
+  }
+  return randi(0, NAME_POOL * 8);
+}
+
+export const randomLook = (): Look => ({
+  skin: randi(0, LOOKS.skin - 1), hair: randi(0, LOOKS.hair - 1),
+  cloth: randi(0, LOOKS.cloth - 1), pants: randi(0, LOOKS.pants - 1),
+});
+
+export function makeNpc(s: GameState, role: Role, x: number, y: number, level = 1, cls?: Cls): Npc {
+  const n: Npc = {
+    id: newId(s), role, cls: cls ?? pick(['warrior', 'archer', 'mage'] as Cls[]), name: freshName(s),
+    look: randomLook(), level, exp: 0, hp: 1, hunger: 80, mood: 70, money: role === 'fighter' ? 60 : 30,
+    home: null, x: x + 0.5, y: y + 0.5, path: [], state: 'idle', goal: null, goalId: 0, inside: null,
+    timer: 0, cd: 0, facing: 1, weapon: null, armor: null, accessory: null, bag: {}, quest: null,
+    carry: null, rescuer: null, downT: 0, repath: 0, profile: -1, plan: [], noFood: 0, kills: 0,
+  };
+  if (role === 'fighter') { n.weapon = EQUIP.weapon[0].key; n.armor = EQUIP.armor[0].key; }
+  n.hp = maxHp(n);
+  return n;
+}
+
+export function maxHp(n: Npc): number {
+  if (n.role !== 'fighter') return 40 + 5 * n.level;
+  const c = CLASSES[n.cls];
+  let hp = c.hp + c.hpG * n.level;
+  hp += equipByKey(n.armor)?.hp ?? 0;
+  hp += equipByKey(n.accessory)?.hp ?? 0;
+  return Math.round(hp);
+}
+
+export interface Stats { maxHp: number; atk: number; def: number; range: number; interval: number }
+
+export function fighterStats(s: GameState, n: Npc): Stats {
+  const c = CLASSES[n.cls];
+  let atk = c.atk + c.atkG * n.level, def = c.def + c.defG * n.level;
+  const w = equipByKey(n.weapon);
+  if (w) atk += w.atk * forgeMult(s.wlv[w.key] ?? 0);
+  atk += equipByKey(n.accessory)?.atk ?? 0;
+  def += equipByKey(n.armor)?.def ?? 0;
+  let m = 1;
+  if (n.home == null) m *= 0.85;
+  if (n.hunger < 20) m *= 0.75;
+  if (n.mood > 70) m *= 1.05;
+  return { maxHp: maxHp(n), atk: atk * m, def: def * m, range: c.range, interval: c.interval };
+}
+
+export function monsterStats(s: GameState, type: string) {
+  const d = MONSTERS[type], L = s.mlv[type].level;
+  const g = 1 + 0.25 * (L - 1);
+  return { maxHp: Math.round(d.hp * g), atk: d.atk * g, def: d.def * (1 + 0.2 * (L - 1)), level: L };
+}
+
+export function debuffs(n: Npc): string[] {
+  const out: string[] = [];
+  if (n.role === 'tourist') return out;
+  if (n.home == null) out.push('homeless');
+  if (n.hunger < 20) out.push('hungry');
+  return out;
+}
+
+export const housed = (s: GameState, b: Building) => s.npcs.filter((n) => n.home === b.id).length;
+export const freeBeds = (s: GameState) =>
+  ofKind(s, 'house').reduce((a, b) => a + HOUSE_CAP - housed(s, b), 0);
+
+export function assignHousing(s: GameState) {
+  const houses = ofKind(s, 'house');
+  const order = (r: Role) => (r === 'civilian' ? 1 : 0);
+  const homeless = s.npcs.filter((n) => n.home == null && n.role !== 'tourist').sort((a, b) => order(a.role) - order(b.role));
+  for (const n of homeless) {
+    const h = houses.find((b) => housed(s, b) < HOUSE_CAP);
+    if (!h) break;
+    n.home = h.id;
+  }
+}
+
+export function attraction(s: GameState): number {
+  return s.buildings.reduce((a, b) => a + BUILDINGS[b.type].attraction * lvMult(b.level), 0);
+}
+
+export function addItem(s: GameState, item: string, n: number) {
+  s.items[item] = (s.items[item] ?? 0) + n;
+  if (!s.disc.includes(item)) s.disc.push(item);
+}
+
+export function spawnNode(s: GameState, kind?: NodeKind, near = false) {
+  const m = mods(s);
+  const k = kind ?? weighted(['tree', 'rock', 'bush'] as NodeKind[], (t) => (t === 'tree' ? 4 * m.wood : t === 'rock' ? 2.5 * m.stone : 2.5 * m.fruit))!;
+  const p = randomZoneTile(near || Math.random() < 0.7 ? 0 : 1);
+  if (s.nodes.some((o) => o.x === p.x && o.y === p.y)) return;
+  const node: ResNode = { id: newId(s), kind: k, x: p.x, y: p.y, amount: randi(6, 14), v: randi(0, 3) };
+  s.nodes.push(node);
+}
+
+export function newGame(village: string): GameState {
+  const s: GameState = {
+    v: 2, village, vlv: 0, roads: [], time: DAY * 0.05, day: 0, money: 4000,
+    items: { wood: 40, stone: 30, fruit: 30, meat: 0 },
+    buildings: [], nodes: [], monsters: [], npcs: [], profiles: [], quests: [], exp: null,
+    mlv: {}, wlv: {}, disc: ['wood', 'stone', 'fruit'], seen: [], nextId: 1, log: [], scored: false, score: null,
+    timers: { spawn: 0, node: 0, rescue: 0 }, stats: { income: 0, lastIncome: 0, kills: 0, tourists: 0 }, fx: [],
+  };
+  const m = villageMods(village);
+  for (const [k, d] of Object.entries(MONSTERS)) s.mlv[k] = { level: d.base + m.monsterLevel, exp: 0 };
+  syncBounds(s);
+  s.roads = baseRoads();
+  syncRoads(s);
+  s.buildings.push({ id: newId(s), type: 'guild', x: 30, y: 30, rot: 0, level: 1, exp: 0 });
+  s.buildings.push({ id: newId(s), type: 'house', x: 30, y: 33, rot: 0, level: 1, exp: 0 });
+  syncBounds(s);
+  for (let i = 0; i < 55; i++) spawnNode(s, undefined, i < 30);
+  for (let i = 0; i < 8; i++) {
+    const x = VB.min + randi(0, VB.max - VB.min), y = VB.min + randi(0, VB.max - VB.min);
+    if (inVillage(x, y) && villageDist(x, y) === 0 && (x < 27 || x > 36 || y < 27 || y > 36) && !isRoad(x, y))
+      s.nodes.push({ id: newId(s), kind: 'tree', x, y, amount: randi(6, 10), v: randi(0, 3) });
+  }
+  const g = guild(s);
+  for (const cls of ['warrior', 'archer', 'mage'] as Cls[]) s.npcs.push(makeNpc(s, 'fighter', g.x + 2, g.y + 1, 1, cls));
+  s.npcs.push(makeNpc(s, 'gatherer', g.x + 2, g.y + 1));
+  assignHousing(s);
+  log(s, 'log.welcome', { village: '@village.' + village + '.name' });
+  return s;
+}
