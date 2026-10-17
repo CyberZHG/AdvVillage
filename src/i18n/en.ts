@@ -122,6 +122,7 @@ const dict: Record<string, string> = {
   'log.arriveFighter': '{c} {n} has arrived in the village.', 'log.arriveGatherer': 'Gatherer {n} has arrived in the village.',
   'log.arriveCivilian': '{n} has moved into the village.', 'log.questExpired': 'The request to defeat {m} has expired.',
   'log.questPosted': 'The guild posted a request: defeat {c} {m} (reward {r} gold).', 'log.questDone': 'The request to defeat {m} was completed (reward {r} gold).',
+  'log.expAuto': 'No party had gone out in a while, so the guild put out a call for an expedition to {loc}.', 'ui.expAuto': 'Guild call',
   'log.expCancel': 'No one signed up for {loc}. The expedition was called off.', 'log.expDepart': 'An expedition of {c} set out for {loc}.',
   'log.expReturn': 'The expedition returned from {loc}: {w} wins, {l} losses, {c} materials brought back.',
 

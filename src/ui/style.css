@@ -69,6 +69,10 @@ img.mimg.sm { width: 22px; vertical-align: middle; }
   background: rgba(20, 26, 60, 0.92); border: 2px solid var(--accent); border-radius: 6px; max-width: calc(100vw - 16px);
 }
 #zoom { position: absolute; right: 8px; bottom: 70px; display: flex; flex-direction: column; gap: 4px; }
+#expbar { position: absolute; bottom: 66px; left: 50%; transform: translateX(-50%); width: min(452px, calc(100vw - 16px)); padding: 4px 6px 6px; cursor: pointer; }
+#exp-label { font-size: 12px; margin-bottom: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#exp-cv { display: block; width: 100%; image-rendering: pixelated; border: 2px solid var(--edge-dark); border-radius: 3px; }
+#hud.exp-on #info, #hud.exp-on #zoom, #hud.exp-on #panel { bottom: 166px; }
 #panel:not(.hidden) ~ #zoom { right: calc(min(440px, 100vw - 16px) + 16px); }
 
 .btn {
@@ -155,6 +159,8 @@ a[data-act] { color: var(--accent); cursor: pointer; text-decoration: underline;
   #info { bottom: 96px; max-height: 45vh; }
   #log { top: 84px; font-size: 11px; }
   #zoom { bottom: 96px; }
+  #expbar { bottom: 92px; }
+  #hud.exp-on #info, #hud.exp-on #zoom, #hud.exp-on #panel { bottom: 192px; }
   .bar { width: 80px; }
 }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; border: 1px solid #000; }

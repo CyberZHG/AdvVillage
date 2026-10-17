@@ -148,6 +148,7 @@ const dict: Record<string, string> = {
   'log.arriveFighter': '{c} {n}이(가) 마을에 왔습니다.', 'log.arriveGatherer': '채집가 {n}이(가) 마을에 왔습니다.',
   'log.arriveCivilian': '{n}이(가) 마을로 이사 왔습니다.', 'log.questExpired': '{m} 토벌 의뢰가 기한이 지났습니다.',
   'log.questPosted': '길드가 의뢰를 냈습니다: {m} {c}마리 토벌 (보상 {r}골드).', 'log.questDone': '{m} 토벌 의뢰를 완수했습니다 (보상 {r}골드).',
+  'log.expAuto': '한동안 원정이 없어 협회가 {loc} 원정대 모집을 시작했습니다.', 'ui.expAuto': '협회 주관',
   'log.expCancel': '{loc} 원정에 지원자가 없어 취소되었습니다.', 'log.expDepart': '{c}명의 원정대가 {loc}(으)로 출발했습니다.',
   'log.expReturn': '원정대가 {loc}에서 돌아왔습니다: {w}승 {l}패, 재료 {c}개 획득.',
 

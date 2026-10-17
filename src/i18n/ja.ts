@@ -148,6 +148,7 @@ const dict: Record<string, string> = {
   'log.arriveFighter': '{c}の{n}が村にやってきました。', 'log.arriveGatherer': '採集者の{n}が村にやってきました。',
   'log.arriveCivilian': '{n}が村に引っ越してきました。', 'log.questExpired': '{m}討伐の依頼が期限切れになりました。',
   'log.questPosted': 'ギルドが依頼を出しました：{m}を{c}体討伐（報酬{r}ゴールド）。', 'log.questDone': '{m}討伐の依頼が達成されました（報酬{r}ゴールド）。',
+  'log.expAuto': 'しばらく遠征がなかったため、協会が{loc}への遠征隊を募集しました。', 'ui.expAuto': '協会発案',
   'log.expCancel': '{loc}への遠征は応募者がなく中止になりました。', 'log.expDepart': '{c}人の遠征隊が{loc}へ出発しました。',
   'log.expReturn': '遠征隊が{loc}から戻りました：{w}勝{l}敗、素材{c}個を持ち帰りました。',
 

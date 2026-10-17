@@ -122,6 +122,7 @@ const dict: Record<string, string> = {
   'log.arriveFighter': '{c}{n}来到了村子。', 'log.arriveGatherer': '采集者{n}来到了村子。',
   'log.arriveCivilian': '{n}搬进了村子。', 'log.questExpired': '讨伐{m}的委托已过期。',
   'log.questPosted': '协会发布委托：讨伐{m} ×{c}（报酬{r}金币）。', 'log.questDone': '讨伐{m}的委托已完成（报酬{r}金币）。',
+  'log.expAuto': '许久没有远征，协会自行发起了前往{loc}的远征招募。', 'ui.expAuto': '协会发起',
   'log.expCancel': '无人报名前往{loc}，远征取消。', 'log.expDepart': '{c}人的远征队出发前往{loc}。',
   'log.expReturn': '远征队从{loc}归来：胜{w}场，负{l}场，带回材料{c}件。',
 

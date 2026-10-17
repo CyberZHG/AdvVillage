@@ -32,7 +32,7 @@ export interface Npc {
   profile: number; plan: number[]; noFood: number; kills: number;
   title?: string; titles?: string[]; fk?: Record<string, number>; partner?: number | null; spouse?: number | null;
   downs?: number; yk?: number; exps?: number; bosses?: number;
-  rival?: number | null; bio?: LogEntry[]; vip?: string; promoted?: boolean; sk?: Record<string, number>;
+  rival?: number | null; bio?: LogEntry[]; vip?: string; promoted?: boolean; sk?: Record<string, number>; tired?: number;
 }
 
 export interface Profile { name: number; job: string; look: Look; level: number; exp: number; visits: number }
@@ -40,6 +40,7 @@ export interface Quest { id: number; type: string; need: number; done: number; r
 export interface Expedition {
   loc: string; state: 'recruit' | 'depart' | 'away'; members: number[]; until: number;
   wins: number; losses: number; loot: Record<string, number>; nextDay: number;
+  start?: number; foe?: string; foeT?: number; foeWin?: boolean; auto?: boolean;
 }
 export type LogParam = string | number;
 export interface LogEntry { t: number; k: string; p?: Record<string, LogParam> }
@@ -77,7 +78,7 @@ export interface GameState {
   v: number; village: string; vlv: number; roads: number[]; time: number; day: number; money: number;
   items: Record<string, number>;
   buildings: Building[]; nodes: ResNode[]; monsters: Monster[]; npcs: Npc[]; profiles: Profile[];
-  quests: Quest[]; exp: Expedition | null;
+  quests: Quest[]; exp: Expedition | null; expLast?: number;
   mlv: Record<string, { level: number; exp: number }>;
   wlv: Record<string, number>;
   disc: string[]; seen: string[];

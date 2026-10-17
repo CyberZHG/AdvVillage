@@ -2,6 +2,7 @@ import './ui/style.css';
 import { detectLang, getLang, setLang, t } from './i18n';
 import { loadArt } from './render/art';
 import { Renderer } from './render/renderer';
+import { drawExpBar } from './render/expbar';
 import { newGame } from './game/state';
 import { step } from './game/sim';
 import { TICK } from './game/constants';
@@ -362,6 +363,7 @@ function frame(time: number) {
   advance();
   if (s) {
     renderer.render(s, time / 1000);
+    if (s.exp) drawExpBar($('exp-cv') as HTMLCanvasElement, s, time / 1000);
     if (time - uiTimer > 250 && !hudHeld) { uiTimer = time; refresh(); }
   }
   requestAnimationFrame(frame);

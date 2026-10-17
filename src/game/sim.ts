@@ -5,10 +5,10 @@ import {
 import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, EAST_EXIT, SCORE_YEAR, SOUTH_EXIT } from './constants';
 import { dropCount, expReward, famExpNeed, gainExp, lvMult } from './level';
 import {
-  addItem, assignHousing, attraction, bio, bld, fighterStats, freeBeds, fx, guild, isNight, log, makeNpc,
+  addItem, assignHousing, attraction, bio, bld, fighterStats, freeBeds, fx, guild, isNight, log, makeNpc, residents,
   maxHp, monsterStats, mods, newId, npcById, ofKind, spawnNode, tod, year, freshName, type Stats,
 } from './state';
-import { canForge, computeScore, earn, forgeUpgrade, goodsItem, goodsPrice, priceAt } from './econ';
+import { canForge, computeScore, earn, expeditionAvailable, forgeUpgrade, goodsItem, goodsPrice, launchExpedition, priceAt } from './econ';
 import { rbonus, researchTick } from './research';
 import { catDaily, catTick, catTouristBonus } from './cat';
 import { autoDaily } from './auto';
@@ -33,6 +33,10 @@ const SLOTS = ['weapon', 'armor', 'accessory'] as const;
 const SPEED = { fighter: 2.8, gatherer: 2.4, civilian: 1.5, tourist: 1.5 };
 const HUNGER_RATE = 100 / (6 * DAY);
 const MOOD_RATE = 100 / (6 * DAY);
+// days are short, so workers only turn in after staying up a few nights; each keeps their own rhythm
+const TIRE_RATE = 1 / (3 * DAY);
+const worker = (n: Npc) => n.role === 'fighter' || n.role === 'gatherer';
+const sleepy = (s: GameState, n: Npc) => isNight(s) && (n.tired ?? 0) >= 1;
 const MONSTER_INTERVAL = 1.2;
 const SHINY_RATE = 1 / 150;
 const DEPTH_LEVELS = 4;
@@ -147,6 +151,7 @@ function updateNpc(s: GameState, n: Npc, dt: number) {
   if (n.state !== 'away' && n.state !== 'down' && n.state !== 'carried') {
     n.hunger = Math.max(0, n.hunger - HUNGER_RATE * mods(s).hunger * dt);
     n.mood = Math.max(0, n.mood - MOOD_RATE * dt);
+    if (worker(n) && n.state !== 'inside' && n.goal !== 'camp') n.tired = Math.min(1, (n.tired ??= Math.random()) + TIRE_RATE * dt);
     if (n.role === 'fighter' && n.state !== 'fight' && n.state !== 'inside') n.hp = Math.min(maxHp(s, n), n.hp + maxHp(s, n) * 0.003 * dt);
   }
   switch (n.state) {
@@ -154,7 +159,10 @@ function updateNpc(s: GameState, n: Npc, dt: number) {
     case 'walk': if (move(n, dt)) arrive(s, n); break;
     case 'wait':
       n.timer -= dt;
-      if (n.goal === 'camp' ? !isNight(s) : n.timer <= 0) { n.state = 'idle'; n.goal = null; }
+      if (n.goal === 'camp' ? !isNight(s) : n.timer <= 0) {
+        if (n.goal === 'camp') n.tired = 0;
+        n.state = 'idle'; n.goal = null;
+      }
       break;
     case 'inside': insideTick(s, n, dt); break;
     case 'hunt': huntTick(s, n, dt); break;
@@ -247,7 +255,7 @@ function pickTarget(s: GameState, n: Npc, st: Stats): Monster | null {
 function decideFighter(s: GameState, n: Npc) {
   const st = fighterStats(s, n);
   if (n.hp < st.maxHp * 0.5) return goRest(s, n);
-  if (isNight(s)) {
+  if (sleepy(s, n)) {
     if (villageDist(Math.floor(n.x), Math.floor(n.y)) > 6) { wait(n, 0); n.goal = 'camp'; return; }
     return goBuilding(s, n, homeOrGuild(s, n), 'sleep');
   }
@@ -271,7 +279,7 @@ function decideFighter(s: GameState, n: Npc) {
 }
 
 function decideGatherer(s: GameState, n: Npc) {
-  if (isNight(s)) return goBuilding(s, n, homeOrGuild(s, n), 'sleep');
+  if (sleepy(s, n)) return goBuilding(s, n, homeOrGuild(s, n), 'sleep');
   if (n.hunger < 40 && tryEat(s, n)) return;
   if (n.mood < 35 && tryFun(s, n)) return;
   if (bagCount(n) >= bagCap(n)) return goBuilding(s, n, guild(s), 'deposit');
@@ -452,6 +460,7 @@ function insideTick(s: GameState, n: Npc, dt: number) {
       n.hp = Math.min(maxHp(s, n), n.hp + maxHp(s, n) * rate * dt);
     }
     const done = n.goal === 'rest' ? n.hp >= maxHp(s, n) * 0.95 : !isNight(s);
+    if (done && n.goal === 'sleep') n.tired = 0;
     if (done) leave(s, n);
     return;
   }
@@ -471,7 +480,7 @@ const hit = (atk: number, def: number) => Math.max(1, Math.round(atk * rand(0.85
 function huntTick(s: GameState, n: Npc, dt: number) {
   const m = s.monsters.find((o) => o.id === n.goalId);
   if (!m) { n.state = 'idle'; return; }
-  if (isNight(s) && m.target !== n.id) { n.state = 'idle'; return; }
+  if (sleepy(s, n) && m.target !== n.id) { n.state = 'idle'; return; }
   const st = fighterStats(s, n);
   const d = dist(n.x, n.y, m.x, m.y);
   if (d <= st.range) { n.state = 'fight'; n.cd = 0.3; n.path = []; return; }
@@ -714,7 +723,7 @@ function spawnNodeTick(s: GameState) {
 
 function gatherTick(s: GameState, n: Npc, dt: number) {
   const node = s.nodes.find((o) => o.id === n.goalId);
-  if (!node || isNight(s)) { n.state = 'idle'; return; }
+  if (!node || sleepy(s, n)) { n.state = 'idle'; return; }
   n.timer += dt;
   const interval = 0.6 / (1 + 0.1 * Math.sqrt(n.level - 1)) / (1 + rbonus(s, 'gathering') + petBonus(s, 'hauler'));
   if (n.timer < interval) return;
@@ -865,6 +874,7 @@ function daily(s: GameState) {
   familyDaily(s);
   commissionsDaily(s);
   vipDaily(s);
+  autoExpedition(s);
   catDaily(s);
   rivalsDaily(s);
   for (const n of s.npcs) if (n.role === 'fighter') checkTitles(s, n);
@@ -986,7 +996,7 @@ function expeditionTick(s: GameState) {
   if (e.state === 'recruit') {
     e.members = members().filter((n) => n.state === 'inside' && n.goal === 'expWait').map((n) => n.id);
     if (s.time < e.until) return;
-    if (!e.members.length) { log(s, 'log.expCancel', { loc: '@ex.' + e.loc }); s.exp = null; return; }
+    if (!e.members.length) { log(s, 'log.expCancel', { loc: '@ex.' + e.loc }); s.exp = null; s.expLast = s.time; return; }
     e.state = 'depart';
     for (const n of members()) { leave(s, n); goTo(s, n, EAST_EXIT.x, EAST_EXIT.y, 'exitExp'); }
     log(s, 'log.expDepart', { loc: '@ex.' + e.loc, c: e.members.length });
@@ -994,10 +1004,10 @@ function expeditionTick(s: GameState) {
   }
   if (e.state === 'depart') {
     e.members = members().filter((n) => n.state === 'away' || (n.state === 'walk' && n.goal === 'exitExp')).map((n) => n.id);
-    if (!e.members.length) { s.exp = null; return; }
+    if (!e.members.length) { s.exp = null; s.expLast = s.time; return; }
     if (members().every((n) => n.state === 'away')) {
       const def = EXPEDITIONS.find((x) => x.key === e.loc)!;
-      e.state = 'away'; e.until = s.time + def.days * DAY; e.nextDay = s.time + DAY;
+      e.state = 'away'; e.start = s.time; e.until = s.time + def.days * DAY; e.nextDay = s.time + DAY;
     }
     return;
   }
@@ -1024,7 +1034,25 @@ function expeditionTick(s: GameState) {
     }
     log(s, 'log.expReturn', { loc: '@ex.' + e.loc, w: e.wins, l: e.losses, c: items.reduce((a, [, c]) => a + c, 0) });
     s.exp = null;
+    s.expLast = s.time;
   }
+}
+
+// after a long quiet spell the guild sends a party out on its own, favouring places it has explored least
+const AUTO_EXP_GAP = 3 * DAYS_PER_MONTH * DAY;
+function autoExpedition(s: GameState) {
+  if (s.exp || s.time - (s.expLast ?? 0) < AUTO_EXP_GAP || !chance(0.15)) return;
+  const fs = residents(s).filter((n) => n.role === 'fighter').sort((a, b) => b.level - a.level).slice(0, 5);
+  if (fs.length < 3) return;
+  const lv = fs.reduce((a, n) => a + n.level, 0) / fs.length;
+  const foeLv = (k: string) => {
+    const d = EXPEDITIONS.find((x) => x.key === k)!;
+    return d.monsters.reduce((a, m) => a + s.mlv[m].level, 0) / d.monsters.length + (s.depth[k] ?? 0) * DEPTH_LEVELS;
+  };
+  const open = EXPEDITIONS.filter((d) => expeditionAvailable(s, d.key)).sort((x, y) => foeLv(x.key) - foeLv(y.key));
+  const fit = open.filter((d) => foeLv(d.key) <= lv * 1.1);
+  const d = fit.length ? weighted(fit, (d) => 1 / (1 + (s.depth[d.key] ?? 0))) : open[0];
+  if (d && launchExpedition(s, d.key)) { s.exp!.auto = true; log(s, 'log.expAuto', { loc: '@ex.' + d.key }); }
 }
 
 function expeditionDay(s: GameState, e: Expedition, ms: Npc[]) {
@@ -1043,7 +1071,10 @@ function expeditionDay(s: GameState, e: Expedition, ms: Npc[]) {
     const ttkM = (g * mst.maxHp) / partyDps;
     const ttkP = partyHp / ((g * Math.max(1, mst.atk - partyDef * 0.5)) / MONSTER_INTERVAL);
     const avgL = ms.reduce((a, n) => a + n.level, 0) / ms.length;
-    if (ttkM < ttkP * rand(0.7, 1.3)) {
+    const won = ttkM < ttkP * rand(0.7, 1.3);
+    // the day's first fight is what the progress strip shows
+    if (b === 0) { e.foe = type; e.foeT = s.time; e.foeWin = won; }
+    if (won) {
       e.wins++;
       const frac = Math.min(0.8, (ttkM / ttkP) * 0.5);
       for (const n of ms) { n.hp = Math.max(1, n.hp - maxHp(s, n) * frac * rand(0.5, 1)); gainNpcExp(s, n, expReward(mst.level) * g); }

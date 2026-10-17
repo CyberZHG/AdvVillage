@@ -1,3 +1,4 @@
+import { EXP_H, EXP_W } from '../render/expbar';
 import { t, fmt, npcName, param, LANGS, getLang } from '../i18n';
 import {
   BUILDINGS, CATEGORIES, CLASS_KEYS, DECOR_MAX, DECOR_RADIUS, DECOR_STEP, EQUIP, EXPEDITIONS, ITEMS, MONSTERS, mapZone, ROAD_COST,
@@ -90,6 +91,7 @@ export function mountHud() {
     <div id="panel" class="win hidden"><div class="win-title"><span id="panel-title"></span>${btn('close', '✕', { cls: 'x' })}</div><div class="win-body" id="panel-body"></div></div>
     <div id="placing" class="hidden"></div>
     <div id="zoom">${btn('zoomIn', '+')}${btn('zoomOut', '−')}</div>
+    <div id="expbar" class="win hidden" data-act="tab:guild"><div id="exp-label"></div><canvas id="exp-cv" width="${EXP_W}" height="${EXP_H}"></canvas></div>
     <div id="toolbar"></div>`;
 }
 
@@ -124,6 +126,15 @@ export function updateHud(c: Ctl, tab: Tab | null) {
   setHtml('t-speed', btn('focus', t('ui.focus'), { cls: c.focus ? 'on' : '' }) + btn('labels', t('ui.labels'), { cls: c.labels ? 'on' : '' }) + [0, 1, 2, 4, 8].map((v) => btn('speed:' + v, v ? '×' + v : '❚❚', { cls: c.speed === v ? 'on' : '' })).join(''));
   setHtml('toolbar', TABS.map((k) => btn('tab:' + k, t('tab.' + k), { cls: tab === k ? 'on' : '' })).join(''));
   setHtml('log', s.log.slice(-6).map((l, i, a) => `<div class="log-line" style="opacity:${0.45 + (0.55 * (i + 1)) / a.length}"><span class="log-date">${t('ui.dayShort', { y: Math.floor(l.t / DAYS_PER_YEAR) + 1, m: Math.floor((l.t % DAYS_PER_YEAR) / DAYS_PER_MONTH) + 1 })}</span> ${esc(t(l.k, l.p))}</div>`).join(''));
+
+  const e = s.exp;
+  $('expbar').classList.toggle('hidden', !e);
+  $('hud').classList.toggle('exp-on', !!e);
+  if (e) {
+    const left = Math.max(0, Math.ceil((e.until - s.time) / DAY));
+    setHtml('exp-label', `<b>${t('ex.' + e.loc)}</b> · ${t('exs.' + e.state)}${e.state !== 'depart' ? ` · ${t('ui.daysLeft', { n: left })}` : ''}`
+      + `${e.state === 'away' ? ` · ${t('ui.record', { w: e.wins, l: e.losses })}` : ''}${e.auto ? ` <span class="tag">${t('ui.expAuto')}</span>` : ''}`);
+  }
 
   const placing = $('placing');
   placing.classList.toggle('hidden', !c.placing);
