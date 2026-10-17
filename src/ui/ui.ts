@@ -19,8 +19,10 @@ import { SEASONS, currentBoss, festival, season } from '../game/events';
 import { titleBonus } from '../game/social';
 import { buildingIcon, catIcon, humanIcon, itemIcon, monsterIcon } from '../render/art';
 import { CLASS_COLOR, type Sel } from '../render/renderer';
-import { RESEARCH, canResearch, researchCost, rlv } from '../game/research';
-import { CAT_MAX, CAT_PERKS, catNeed } from '../game/cat';
+import { QUEUE_MAX, RESEARCH, canQueue, canResearch, researchCost, rlv } from '../game/research';
+import { AUTO_KEYS, autoReserve } from '../game/auto';
+import { COMMON_PER, PROC, SKILL_MAX, chargeMult, mendPower, procChance, skillsOf, slv } from '../game/skills';
+import { CAT_MAX, CAT_PERKS, catNeed, petsLeft } from '../game/cat';
 import { PET_BONUS, petCap, petRole } from '../game/pets';
 import { SEASON_HOT, hotNow } from '../game/events';
 import type { OfflineReport } from '../game/offline';
@@ -285,7 +287,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       if (e.hp) parts.push(`HP ${e.hp} → ${Math.round(e.hp * f)}`);
       return parts.join(' · ');
     };
-    return `<p class="meta">${t('ui.forgeHint')}</p>${effectTag(s, 'smith')}<div class="btns">${slots.map((k) => btn('forgeSlot:' + k, t('slot.' + k), { cls: forgeSlot === k ? 'on' : '' })).join('')}</div>` +
+    return `<p class="meta">${t('ui.forgeHint')}</p>${effectTag(s, 'smith')}<div class="btns">${btn('auto:forge', t('auto.forge'), { cls: s.auto.forge ? 'on' : '' })}</div><div class="btns">${slots.map((k) => btn('forgeSlot:' + k, t('slot.' + k), { cls: forgeSlot === k ? 'on' : '' })).join('')}</div>` +
       (forgeable(s, forgeSlot).map((k) => {
         const L = s.wlv[k] ?? 0;
         const fc = forgeCost(s, k);
@@ -303,7 +305,12 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     const s = c.s;
     let h = `<p class="meta">${t('ui.researchHint')}</p>`;
     const r = s.researching;
-    if (r) h += `<div class="box"><b>${t('rs.' + r.k)}</b> ${t('ui.lv', { lv: rlv(s, r.k) + 1 })} — ${t('ui.researching')} (${t('ui.daysLeft', { n: Math.max(0, Math.ceil((r.until - s.time) / DAY)) })})</div>`;
+    if (r) {
+      const q = s.rqueue.map((k, i) => `<span class="tag">${i + 1}. ${t('rs.' + k)}</span>`).join('');
+      h += `<div class="box"><b>${t('rs.' + r.k)}</b> ${t('ui.lv', { lv: rlv(s, r.k) + 1 })} — ${t('ui.researching')} (${t('ui.daysLeft', { n: Math.max(0, Math.ceil((r.until - s.time) / DAY)) })})
+        <br><small>${t('ui.queue')} ${s.rqueue.length}/${QUEUE_MAX}</small> ${q}</div>`;
+    }
+    h += `<div class="btns">${btn('auto:research', t('auto.research'), { cls: s.auto.research ? 'on' : '' })}</div>`;
     return h + RESEARCH.map((d) => {
       const L = rlv(s, d.key), max = L >= d.max;
       const rc = researchCost(s, d.key), have = s.items[rc.mat] ?? 0;
@@ -311,7 +318,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       return `<div class="row ${r?.k === d.key ? 'on' : ''}"><span class="grow"><b>${t('rs.' + d.key)}</b> ${t('ui.lv', { lv: L })}/${d.max}
         <br><small>${eff}</small>
         ${max ? '' : `<br>${money(rc.money, s.money >= rc.money)} <span class="cost ${have >= rc.count ? '' : 'bad'}">${img(itemIcon(rc.mat))}${s.disc.includes(rc.mat) ? t('item.' + rc.mat) : t('ui.unknown')} ${fmt(have)}/${fmt(rc.count)}</span> <small>${t('ui.days', { n: rc.days })}</small>`}</span>
-        ${max ? `<small>${t('ui.maxed')}</small>` : btn('research:' + d.key, t('ui.research'), { disabled: !canResearch(s, d.key) })}</div>`;
+        ${max ? `<small>${t('ui.maxed')}</small>` : researchBtn(s, d.key)}</div>`;
     }).join('');
   },
 
@@ -363,6 +370,8 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
   settings(c) {
     const langs = Object.entries(LANGS).map(([k, p]) => btn('lang:' + k, p.label, { cls: getLang() === k ? 'on' : '' })).join('');
     return `<h3>${t('ui.language')}</h3><div class="btns">${langs}</div>
+      <h3>${t('ui.auto')}</h3><div class="btns">${AUTO_KEYS.map((k) => btn('auto:' + k, t('auto.' + k), { cls: c.s.auto[k] ? 'on' : '' })).join('')}</div>
+      <p class="meta">${t('ui.autoHint', { v: fmt(autoReserve(c.s)) })}</p>
       <h3>${t('ui.data')}</h3><div class="btns">${btn('save', t('ui.saveNow'))}${btn('title', t('ui.backTitle'))}</div>
       <p class="meta">${t('ui.autosave')}</p>
       <h3>${t('ui.backup')}</h3><div class="btns">${btn('export', t('ui.exportFile'))}${btn('exportCopy', t('ui.exportCopy'))}${btn('importOpen', t('ui.import'))}</div>
@@ -451,6 +460,7 @@ function infoCard(c: Ctl): string {
     body += '</div>';
     const db = debuffs(n);
     if (db.length) body += `<div>${db.map((d) => `<span class="tag bad">${t('debuff.' + d)}: ${t('debuffd.' + d)}</span>`).join('')}</div>`;
+    if (n.role === 'fighter') body += skillsHtml(n);
     if (n.bio?.length) body += `<h3>${t('ui.story')}</h3><ul class="bio">${[...n.bio].reverse().map((e) => `<li><span class="log-date">${t('ui.dayShort', { y: Math.floor(e.t / DAYS_PER_YEAR) + 1, m: Math.floor((e.t % DAYS_PER_YEAR) / DAYS_PER_MONTH) + 1 })}</span> ${esc(t(e.k, e.p))}</li>`).join('')}</ul>`;
   }
   if (n.vip) body += `<p class="meta">${t('vipd.' + n.vip)}</p>`;
@@ -624,7 +634,7 @@ const dayText = (d: number) => t('ui.dayShort', { y: Math.floor(d / DAYS_PER_YEA
 
 function companionsHtml(s: GameState): string {
   let h = `<h3>${t('ui.companions')}</h3>`;
-  if (s.cat) h += `<div class="row click" data-act="select:cat:0">${img(catIcon(), 'mimg')}<span class="grow"><b>${t('cat.name')}</b> ${t('ui.catLv', { lv: s.cat.lv })}
+  if (s.cat) h += `<div class="row click" data-act="select:cat:0">${img(catIcon(s.cat.coat), 'mimg')}<span class="grow"><b>${t('cat.name')}</b> ${t('ui.catLv', { lv: s.cat.lv })}
     <br>${bar(s.cat.lv >= CAT_MAX ? 1 : s.cat.exp / catNeed(s.cat.lv), 'fam')} <small>${t('cata.' + s.cat.act)}</small></span></div>`;
   h += s.pets.map((p) => `<div class="row click" data-act="select:pet:${p.id}">${img(monsterIcon(p.type), 'mimg')}<span class="grow"><b>${t('m.' + p.type)}</b>
     <br><small>${t('pet.' + petRole(p.type))}</small></span></div>`).join('');
@@ -636,11 +646,12 @@ function catCard(c: Ctl): string {
   if (!cat) return '';
   const perks = CAT_PERKS.map(([k, lv]) => `<li class="${cat.lv >= lv ? 'good' : 'dim'}">${t('ui.catLv', { lv })} · ${t('catp.' + k, { p: cat.lv })}</li>`).join('');
   const ready = s.time - cat.petT >= 3;
-  return `<div class="win-title">${img(catIcon(), 'mimg')}<span class="grow"><b>${t('cat.name')}</b> <small>${t('ui.catLv', { lv: cat.lv })}</small></span>${btn('deselect', '✕', { cls: 'x' })}</div>
+  return `<div class="win-title">${img(catIcon(cat.coat), 'mimg')}<span class="grow"><b>${t('cat.name')}</b> <small>${t('ui.catLv', { lv: cat.lv })}</small></span>${btn('deselect', '✕', { cls: 'x' })}</div>
     <div class="win-body"><div class="kv"><span>${t('ui.status')}</span><b>${t('cata.' + cat.act)}</b>
     <span>${t('ui.affection')}</span><b>${bar(cat.lv >= CAT_MAX ? 1 : cat.exp / catNeed(cat.lv), 'fam')}</b>
+    <span>${t('ui.catCoat')}</span><b>${t('coat.' + (cat.coat ?? 'orange'))}</b>
     <span>${t('ui.catSince')}</span><b>${dayText(cat.since)}</b></div>
-    <div class="btns">${btn('petCat', t('ui.petCat'), { cls: 'primary', disabled: !ready })}</div>
+    <div class="btns">${btn('petCat', t('ui.petCat'), { cls: 'primary', disabled: !ready })} <small>${t('ui.catPetsLeft', { n: petsLeft(s) })}</small></div>
     <p class="meta">${t('ui.catHint')}</p><ul class="bio">${perks}</ul></div>`;
 }
 
@@ -665,6 +676,24 @@ export function offlineHtml(r: OfflineReport): string {
   return `<div class="win modal-box"><div class="win-title"><b>${t('ui.offlineTitle')}</b></div><div class="win-body">
     <p>${t('ui.offlineAway', { h, m })}</p>
     <div class="kv"><span>${t('item.money')}</span><b>${money(r.money)}</b><span>${t('ui.offlineLevels')}</span><b>${fmt(r.levels)}</b></div>
-    ${items ? `<div class="tags">${items}</div>` : ''}<p class="meta">${t('ui.offlineHint')}</p>
+    ${items ? `<div class="tags">${items}</div>` : ''}
+    ${r.research.length ? `<p>${t('ui.offlineResearch', { r: r.research.map((k) => t('rs.' + k)).join(' / ') })}</p>` : ''}<p class="meta">${t('ui.offlineHint')}</p>
     <div class="btns center">${btn('closeModal', t('ui.continuePlay'), { cls: 'primary' })}</div></div></div>`;
+}
+
+function researchBtn(s: GameState, k: string): string {
+  if (!s.researching) return btn('research:' + k, t('ui.research'), { disabled: !canResearch(s, k) });
+  if (s.researching.k === k) return '';
+  if (s.rqueue.includes(k)) return btn('unqueue:' + k, t('ui.unqueue'));
+  return btn('queue:' + k, t('ui.queueAdd'), { disabled: !canQueue(s, k) });
+}
+
+function skillsHtml(n: Npc): string {
+  const pct = (v: number) => Math.round(v * 1000) / 10;
+  const rows = skillsOf(n).map((k) => {
+    const L = slv(n, k), frac = (n.sk?.[k] ?? 0) - L;
+    const p = k in COMMON_PER ? pct(COMMON_PER[k] * L) : k in PROC ? pct(procChance(n, k)) : k === 'mend' ? pct(mendPower(n)) : pct(chargeMult(n));
+    return `<span>${t('sk.' + k)} <small>${t('ui.lv', { lv: L })}</small></span><b>${L >= SKILL_MAX ? `<small>${t('ui.maxed')}</small>` : bar(frac, 'fam')} <small>${t('skd.' + k, { p })}</small></b>`;
+  }).join('');
+  return `<h3>${t('ui.skills')}</h3><div class="kv">${rows}</div><p class="meta">${t('ui.skillsHint')}</p>`;
 }

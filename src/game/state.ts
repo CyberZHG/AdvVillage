@@ -7,6 +7,7 @@ import { makeLook, randomJob } from './looks';
 import { comboAppeal } from './combos';
 import { titleBonus } from './social';
 import { rbonus } from './research';
+import { skillMult } from './skills';
 import type { Building, Cls, GameState, LogParam, Monster, Npc, ResNode, Role } from './types';
 
 export const NAME_POOL = 128;
@@ -86,7 +87,7 @@ export function maxHp(s: GameState, n: Npc): number {
   let hp = c.hp + c.hpG * n.level;
   hp += (equipByKey(n.armor)?.hp ?? 0) * forged(s, n.armor);
   hp += (equipByKey(n.accessory)?.hp ?? 0) * forged(s, n.accessory);
-  hp *= titleBonus(n).hp * (n.promoted ? PROMOTE_BONUS : 1);
+  hp *= titleBonus(n).hp * (n.promoted ? PROMOTE_BONUS : 1) * skillMult(n, 'vigor');
   return Math.round(hp);
 }
 
@@ -107,7 +108,7 @@ export function fighterStats(s: GameState, n: Npc): Stats {
   if (rivalNear(s, n)) m *= 1.1;
   m *= (1 + rbonus(s, 'tactics')) * (n.promoted ? PROMOTE_BONUS : 1);
   const tb = titleBonus(n);
-  return { maxHp: maxHp(s, n), atk: atk * m * tb.atk, def: def * m * tb.def, range: c.range, interval: c.interval };
+  return { maxHp: maxHp(s, n), atk: atk * m * tb.atk * skillMult(n, 'blade'), def: def * m * tb.def * skillMult(n, 'guard'), range: c.range, interval: c.interval };
 }
 
 // a rival fighting close by spurs both of them on
@@ -163,7 +164,7 @@ export function spawnNode(s: GameState, kind?: NodeKind, near = false) {
   const k = kind ?? weighted(['tree', 'rock', 'bush'] as NodeKind[], (t) => (t === 'tree' ? 4 * m.wood : t === 'rock' ? 2.5 * m.stone : 2.5 * m.fruit))!;
   const p = randomZoneTile(near || Math.random() < 0.7 ? 0 : 1);
   if (s.nodes.some((o) => o.x === p.x && o.y === p.y)) return;
-  const node: ResNode = { id: newId(s), kind: k, x: p.x, y: p.y, amount: randi(6, 14), v: randi(0, 3) };
+  const node: ResNode = { id: newId(s), kind: k, x: p.x, y: p.y, amount: randi(6, 14), v: randi(0, 3), born: s.time };
   s.nodes.push(node);
 }
 
@@ -178,7 +179,7 @@ export function newGame(village: string): GameState {
     comboSeen: [], weather: 'clear', effects: [], bonds: {}, couples: [], reports: [], ys: emptyYear(), shinySeen: [],
     merchant: null, nextBoss: 40, fx: [],
     fame: 0, commissions: [], cseason: -1, rivals: [], nextVip: 45, vips: [], notes: [],
-    research: {}, researching: null, depth: {}, pets: [], cat: null, hist: [], histBase: { e: 0, t: 0, k: 0 },
+    research: {}, researching: null, rqueue: [], auto: { research: false, forge: false, upgrade: false }, depth: {}, pets: [], cat: null, hist: [], histBase: { e: 0, t: 0, k: 0 },
   };
   const m = villageMods(village);
   for (const [k, d] of Object.entries(MONSTERS)) s.mlv[k] = { level: d.base + m.monsterLevel, exp: 0 };

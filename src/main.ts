@@ -14,7 +14,8 @@ import { buyOffer, currentBoss } from './game/events';
 import { build, canBuild, demolish, expand, forgeUpgrade, launchExpedition, placeRoad, removeRoad, upgrade } from './game/econ';
 import { bld } from './game/state';
 import { offlineHtml, setChartKind, setForgeSlot } from './ui/ui';
-import { startResearch } from './game/research';
+import { queueResearch, startResearch, unqueueResearch } from './game/research';
+import type { AutoKey } from './game/auto';
 import { petCat } from './game/cat';
 import { releasePet } from './game/pets';
 import { settleOffline } from './game/offline';
@@ -174,6 +175,9 @@ function act(a: string) {
     case 'forge': if (!forgeUpgrade(s!, x, 'village')) toast(t('ui.notEnough')); break;
     case 'forgeSlot': setForgeSlot(x); break;
     case 'research': if (!startResearch(s!, x)) toast(t('ui.notEnough')); break;
+    case 'queue': queueResearch(s!, x); break;
+    case 'unqueue': unqueueResearch(s!, x); break;
+    case 'auto': s!.auto[x as AutoKey] = !s!.auto[x as AutoKey]; break;
     case 'chart': setChartKind(x); break;
     case 'petCat': petCat(s!); break;
     case 'release': {
@@ -364,7 +368,19 @@ function frame(time: number) {
 }
 
 setInterval(() => { if (document.hidden) advance(); }, 1000);
-document.addEventListener('visibilitychange', () => { if (document.hidden && s) saveGame(s); });
+// a suspended tab (common on phones) is settled like time away once it comes back
+document.addEventListener('visibilitychange', () => {
+  if (!s) return;
+  if (document.hidden) { saveGame(s); return; }
+  if (!speed) return;
+  const away = settleOffline(s);
+  if (!away) return;
+  last = performance.now();
+  acc = 0;
+  saveGame(s);
+  showModal(offlineHtml(away));
+  refresh();
+});
 window.addEventListener('beforeunload', () => { if (s) saveGame(s); });
 
 mountHud();

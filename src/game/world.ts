@@ -219,3 +219,17 @@ export function segmentAvoidsVillage(ax: number, ay: number, bx: number, by: num
   }
   return true;
 }
+
+// a point on the map's rim, and a spot in the given zone along the way from there toward the village
+export function edgeEntry(zone: number): { from: P; to: P } {
+  const t = Math.random() * (MAP - 1), side = Math.floor(Math.random() * 4);
+  const from = side === 0 ? { x: t, y: 0.5 } : side === 1 ? { x: MAP - 1.5, y: t } : side === 2 ? { x: t, y: MAP - 1.5 } : { x: 0.5, y: t };
+  const cx = (VB.min + VB.max + 1) / 2, cy = cx;
+  const hits: P[] = [];
+  for (let k = 0; k <= 60; k++) {
+    const x = from.x + ((cx - from.x) * k) / 60, y = from.y + ((cy - from.y) * k) / 60;
+    if (zoneOf(x, y) === zone && villageDist(Math.floor(x), Math.floor(y)) >= 2) hits.push({ x, y });
+  }
+  const p = hits.length ? hits[Math.floor(Math.random() * hits.length)] : from;
+  return { from, to: { x: Math.max(0.5, Math.min(MAP - 1.5, p.x + Math.random() * 3 - 1.5)), y: Math.max(0.5, Math.min(MAP - 1.5, p.y + Math.random() * 3 - 1.5)) } };
+}

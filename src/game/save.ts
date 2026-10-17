@@ -40,7 +40,7 @@ function restore(s: GameState): GameState {
   s.ys ??= emptyYear(); s.shinySeen ??= []; s.merchant ??= null; s.nextBoss ??= s.day + 30;
   s.vlv ??= 0;
   s.fame ??= 0; s.commissions ??= []; s.cseason ??= -1; s.rivals ??= []; s.nextVip ??= s.day + 30; s.vips ??= []; s.notes = [];
-  s.research ??= {}; s.researching ??= null; s.depth ??= {}; s.pets ??= []; s.cat ??= null; s.hist ??= [];
+  s.research ??= {}; s.researching ??= null; s.rqueue ??= []; s.auto ??= { research: false, forge: false, upgrade: false }; s.depth ??= {}; s.pets ??= []; s.cat ??= null; s.hist ??= [];
   s.histBase ??= { e: s.stats.earned ?? 0, t: s.stats.tourists, k: s.stats.kills };
   for (const n of s.npcs) if (n.role === 'fighter' && n.level >= PROMOTE_LEVEL && !n.promoted) { n.promoted = true; n.look.cape = true; }
   s.stats.earned ??= 0; s.stats.commissions ??= 0; s.stats.goods ??= 0; s.stats.fk ??= {};

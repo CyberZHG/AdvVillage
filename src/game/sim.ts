@@ -11,6 +11,8 @@ import {
 import { canForge, computeScore, earn, forgeUpgrade, goodsItem, goodsPrice, priceAt } from './econ';
 import { rbonus, researchTick } from './research';
 import { catDaily, catTick, catTouristBonus } from './cat';
+import { autoDaily } from './auto';
+import { CLASS_SKILL, chargeMult, mendPower, procChance, skillMult, train } from './skills';
 import { petBonus, petsTick, tryTame } from './pets';
 import { commissionsDaily } from './commissions';
 import { addFame, fameTouristMult, vipDaily, vipLeave, vipSpend, vipVisit } from './fame';
@@ -19,8 +21,8 @@ import { currentBoss, eventsDaily, festival, hasEffect, hotNow, monsterMult, spe
 import { bondFight, checkPromotion, checkTitles, emote, familyDaily, partnerOf, rivalsDaily, rivalsMonthly } from './social';
 import { closeYear } from './report';
 import { chance, dist, pick, rand, randi, weighted } from './util';
-import { ROAD_SPEED, doorOf, findPath, isRoad, randomStreetTile, randomVillageTile, randomZoneTile, segmentAvoidsVillage, villageDist, zoneOf } from './world';
-import type { Building, Expedition, GameState, Goal, Monster, Npc, Profile } from './types';
+import { ROAD_SPEED, blocked, doorOf, edgeEntry, findPath, isRoad, randomStreetTile, randomVillageTile, randomZoneTile, segmentAvoidsVillage, villageDist, zoneOf } from './world';
+import type { Building, Expedition, GameState, Goal, Monster, Npc, P, Profile } from './types';
 
 const JOB_NODE: Record<string, NodeKind> = { woodcutter: 'tree', miner: 'rock', forager: 'bush' };
 // occasional finds while gathering: [item, chance per swing]
@@ -123,7 +125,7 @@ const BIO_LEVELS = new Set([10, 25, 50, 100, 150, 200, 300, 500, 1000, 2000, 500
 
 function gainNpcExp(s: GameState, n: Npc, amount: number) {
   const before = n.level;
-  const boost = n.role === 'fighter' ? (hasEffect(s, 'sage') ? 1.5 : 1) * (1 + rbonus(s, 'training')) : 1;
+  const boost = n.role === 'fighter' ? (hasEffect(s, 'sage') ? 1.5 : 1) * (1 + rbonus(s, 'training')) * skillMult(n, 'instinct') : 1;
   const ups = gainExp(n, amount * boost);
   if (!ups) return;
   checkPromotion(s, n);
@@ -298,6 +300,25 @@ function visitWeight(s: GameState, b: Building) {
   return (d.attraction * lvMult(b.level) + (d.price > 0 ? 1 : 0.3)) * (isPeak(b.type, t) ? 3 : 1) * (hotNow(s, b.type) ? 2.5 : 1);
 }
 
+// festival crowds gather on the streets around the village's showpiece, or the guild if there is none
+const PLAZA = ['clockTower', 'gazebo', 'fountain', 'well', 'flowerArch'];
+function plaza(s: GameState): P {
+  for (const k of PLAZA) {
+    const b = s.buildings.find((o) => o.type === k);
+    if (b) { const n = BUILDINGS[k].size; return { x: b.x + n / 2, y: b.y + n / 2 }; }
+  }
+  return doorOf(guild(s));
+}
+function goFest(s: GameState, n: Npc) {
+  const c = plaza(s);
+  for (let k = 0; k < 24; k++) {
+    const x = Math.floor(c.x + rand(-3.5, 3.5)), y = Math.floor(c.y + rand(-3.5, 3.5));
+    if (isRoad(x, y) && !blocked(s, x, y)) return goTo(s, n, x, y, 'fest');
+  }
+  const d = doorOf(guild(s));
+  goTo(s, n, d.x, d.y, 'fest');
+}
+
 function goLeave(s: GameState, n: Npc) { goTo(s, n, SOUTH_EXIT.x, SOUTH_EXIT.y, 'leave'); }
 
 function decideVisitor(s: GameState, n: Npc) {
@@ -306,6 +327,7 @@ function decideVisitor(s: GameState, n: Npc) {
       const inn = nearest(n, ofKind(s, 'inn').filter((b) => n.money >= priceAt(s, b) * mods(s).touristSpend));
       return inn ? goBuilding(s, n, inn, 'visit') : goLeave(s, n);
     }
+    if (festival(s) && chance(0.25)) return goFest(s, n);
     let b: Building | undefined;
     while (n.plan.length && !(b = bld(s, n.plan.shift()!)));
     if (b && !isOpen(b.type, tod(s))) b = weighted(s.buildings.filter((o) => visitable(o, true)), (o) => visitWeight(s, o)) ?? undefined;
@@ -316,6 +338,7 @@ function decideVisitor(s: GameState, n: Npc) {
     return h ? goBuilding(s, n, h, 'sleep') : goLeave(s, n);
   }
   if (n.hunger < 40 && tryEat(s, n)) return;
+  if (festival(s) && chance(0.4)) return goFest(s, n);
   const home = bld(s, n.home);
   if (home && chance(0.35)) return goBuilding(s, n, home, 'homeStay');
   if (chance(0.6)) {
@@ -333,6 +356,7 @@ function arrive(s: GameState, n: Npc) {
   const b = bld(s, n.goalId);
   switch (goal) {
     case 'patrol': return wait(n, rand(1.5, 3.5));
+    case 'fest': emote(s, n, pick(['note', 'star', 'heart'])); return wait(n, rand(4, 9));
     case 'leave': return removeVisitor(s, n);
     case 'exitExp': n.state = 'away'; return;
     case 'gatherNode': {
@@ -469,12 +493,46 @@ function fightTick(s: GameState, n: Npc, dt: number) {
   n.cd -= dt;
   if (n.cd > 0) return;
   n.cd = st.interval;
-  const dmg = hit(st.atk, monsterStats(s, m.type, m).def);
+  const ms = monsterStats(s, m.type, m);
+  let atk = st.atk;
+  if (n.cls === 'lancer' && m.hp >= ms.maxHp) { atk *= chargeMult(n); skillFx(s, m, 'charge'); }
+  if (n.cls === 'rogue' && chance(procChance(n, 'crit'))) { atk *= 2; skillFx(s, m, 'crit'); }
+  let dmg = hit(atk, ms.def);
+  if (n.cls === 'archer' && chance(procChance(n, 'volley'))) { dmg += hit(atk, ms.def); skillFx(s, m, 'volley'); }
   m.hp -= dmg;
   fx(s, 'dmg', m.x, m.y, dmg);
+  skill(s, n, 'blade');
+  skill(s, n, CLASS_SKILL[n.cls], 0.6);
+  if (n.cls === 'warrior' && chance(procChance(n, 'cleave'))) splash(s, n, m, 1.3, 0.6, 1, 'cleave');
+  if (n.cls === 'mage' && chance(procChance(n, 'blast'))) splash(s, n, m, 1.6, 0.5, 6, 'blast');
   if (n.cls === 'cleric') healAllies(s, n);
   if (m.target == null) m.target = n.id;
   if (m.hp <= 0) killMonster(s, m, n);
+}
+
+function skill(s: GameState, n: Npc, k: string, rate = 1) {
+  const lv = train(n, k, rate);
+  if (lv) bio(s, n, 'bio.skill', { k: '@sk.' + k, lv });
+}
+
+// only some triggers are announced so the field stays readable
+function skillFx(s: GameState, at: { x: number; y: number }, k: string) {
+  if (chance(0.5)) fx(s, 'skill', at.x, at.y, k);
+}
+
+// cleave and blast spill onto other monsters standing near the target
+function splash(s: GameState, n: Npc, m: Monster, r: number, f: number, max: number, k: string) {
+  const atk = fighterStats(s, n).atk * f;
+  let hitAny = false;
+  for (const o of s.monsters.filter((o) => o !== m && dist(o.x, o.y, m.x, m.y) <= r).slice(0, max)) {
+    const dmg = hit(atk, monsterStats(s, o.type, o).def);
+    o.hp -= dmg;
+    fx(s, 'dmg', o.x, o.y, dmg);
+    hitAny = true;
+    if (o.target == null) o.target = n.id;
+    if (o.hp <= 0) killMonster(s, o, n);
+  }
+  if (hitAny) skillFx(s, m, k);
 }
 
 // clerics mend the most wounded fighter close by with every swing
@@ -485,7 +543,7 @@ function healAllies(s: GameState, n: Npc) {
     const f = o.hp / maxHp(s, o);
     if (f < worst) { worst = f; best = o; }
   }
-  if (best) best.hp = Math.min(maxHp(s, best), best.hp + maxHp(s, best) * 0.08);
+  if (best) best.hp = Math.min(maxHp(s, best), best.hp + maxHp(s, best) * mendPower(n));
 }
 
 function killMonster(s: GameState, m: Monster, killer: Npc) {
@@ -496,6 +554,7 @@ function killMonster(s: GameState, m: Monster, killer: Npc) {
   const fam = MONSTERS[m.type].fam;
   for (const f of parts) {
     gainNpcExp(s, f, expReward(L) * bonus);
+    skill(s, f, 'instinct', 1.5);
     f.state = 'idle'; f.kills++; f.yk = (f.yk ?? 0) + 1;
     (f.fk ??= {})[fam] = (f.fk[fam] ?? 0) + 1;
     if (f.kills === 1) bio(s, f, 'bio.firstKill', { m: '@m.' + m.type });
@@ -547,6 +606,7 @@ function downFighter(s: GameState, f: Npc, m: Monster) {
   const L = m.lv ?? s.mlv[m.type].level;
   f.hp = 0; f.state = 'down'; f.downT = s.time; f.path = []; f.rescuer = null; f.goal = null;
   f.downs = (f.downs ?? 0) + 1;
+  skill(s, f, 'vigor', 8);
   if (f.downs === 1) bio(s, f, 'bio.firstDown', { m: '@m.' + m.type });
   emote(s, f, 'hurt');
   checkTitles(s, f);
@@ -593,9 +653,13 @@ function updateMonster(s: GameState, m: Monster, dt: number) {
       m.cd -= dt;
       if (m.cd <= 0) {
         m.cd = MONSTER_INTERVAL;
-        const dmg = hit(monsterStats(s, m.type, m).atk, fighterStats(s, f).def);
+        if (f.cls === 'monk' && chance(procChance(f, 'evade'))) { skillFx(s, f, 'evade'); return; }
+        let dmg = hit(monsterStats(s, m.type, m).atk, fighterStats(s, f).def);
+        if (f.cls === 'knight' && chance(procChance(f, 'block'))) { dmg = Math.max(1, Math.round(dmg * 0.3)); skillFx(s, f, 'block'); }
         f.hp -= dmg;
         fx(s, 'dmg', f.x, f.y, dmg);
+        skill(s, f, 'guard');
+        skill(s, f, 'vigor', 0.5);
         if (f.hp <= 0) downFighter(s, f, m);
       }
     }
@@ -604,6 +668,7 @@ function updateMonster(s: GameState, m: Monster, dt: number) {
   if (m.wait > 0) { m.wait -= dt; return; }
   const dx = m.tx - m.x, dy = m.ty - m.y, d = Math.hypot(dx, dy);
   if (d < 0.1) {
+    m.arr = false;
     m.wait = rand(1, 4);
     for (let k = 0; k < 6; k++) {
       const tx = m.x + rand(-5, 5), ty = m.y + rand(-5, 5);
@@ -611,7 +676,7 @@ function updateMonster(s: GameState, m: Monster, dt: number) {
     }
     return;
   }
-  const sp = Math.min(d, 0.8 * dt);
+  const sp = Math.min(d, (m.arr ? 1.3 : 0.8) * dt);
   if (Math.abs(dx - dy) > 0.01) m.facing = dx - dy > 0 ? 1 : -1;
   m.x += (dx / d) * sp; m.y += (dy / d) * sp;
 }
@@ -628,10 +693,11 @@ function spawnMonster(s: GameState) {
   const list = zoneMonsters(zone, villageDef(s.village).ground);
   if (!list.length) return;
   const type = weighted(list, (k) => spawnWeight(MONSTERS[k]))!;
-  const p = randomZoneTile(zone);
+  // monsters come in from the wilds at the map's edge and head toward the village until they reach their own ground
+  const { from, to } = edgeEntry(zone);
   s.monsters.push({
-    id: newId(s), type, x: p.x + 0.5, y: p.y + 0.5, hp: 0, shiny: chance(SHINY_RATE),
-    tx: p.x + 0.5, ty: p.y + 0.5, target: null, cd: 0, facing: 1, zone, wait: rand(0, 3),
+    id: newId(s), type, x: from.x, y: from.y, hp: 0, shiny: chance(SHINY_RATE),
+    tx: to.x, ty: to.y, target: null, cd: 0, facing: 1, zone, wait: 0, arr: true, born: s.time,
   });
   const m = s.monsters[s.monsters.length - 1];
   m.hp = monsterStats(s, type, m).maxHp;
@@ -805,6 +871,7 @@ function daily(s: GameState) {
   assignHousing(s);
   arrivals(s);
   questsDaily(s);
+  autoDaily(s);
   for (const n of s.npcs) if (n.role === 'civilian') n.money += 4;
   if (s.day % DAYS_PER_MONTH === 0) monthly(s);
   if (s.day % DAYS_PER_YEAR === 0) log(s, 'log.newYear', { y: year(s) });

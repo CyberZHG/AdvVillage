@@ -4,11 +4,12 @@ import { maxHp, monsterStats, tod } from '../game/state';
 import { blocked, inVillage, isRoad, placement, roadState, zoneOf } from '../game/world';
 import { t } from '../i18n';
 import { drawAtmosphere, drawEmote, nightAlpha } from './atmosphere';
+import { festival, season } from '../game/events';
 import type { Cat, GameState, Npc } from '../game/types';
 import { hasPerk } from '../game/cat';
 import { makeCanvas } from './pixel';
 import {
-  TILE_H, buildingSprite, catNeck, catSprite, draw, humanSprite, lyingSprite, monsterSprite, nodeSprite, tileSprite, type Sprite, type TileKind,
+  TILE_H, buildingSprite, catNeck, propSprite, seasonal, catSprite, draw, humanSprite, lyingSprite, monsterSprite, nodeSprite, tileSprite, type Sprite, type TileKind,
 } from './art';
 
 export type Sel = { kind: 'npc' | 'bld' | 'mon' | 'pet' | 'cat'; id: number } | null;
@@ -108,7 +109,8 @@ export class Renderer {
 
   private buildGround(s: GameState) {
     const g = villageDef(s.village).ground;
-    const key = `${s.village}:${s.vlv}:${roadState.version}`;
+    const se = landSeason(s);
+    const key = `${s.village}:${s.vlv}:${roadState.version}:${se}`;
     if (this.ground && this.groundKey === key) return;
     this.groundKey = key;
     const c = makeCanvas(MAP * 32 + 32, MAP * 16 + TILE_H);
@@ -122,12 +124,30 @@ export class Renderer {
         else if (inVillage(i, j)) kind = 'village';
         else kind = (['wild0', 'wild1', 'wild2'] as const)[Math.max(0, zoneOf(i, j))];
         const v = ((i * 73856093) ^ (j * 19349663)) >>> 0;
-        draw(ctx, tileSprite(g, kind, v), GX + (i - j) * 16, (i + j) * 8);
+        draw(ctx, seasonal(tileSprite(g, kind, v), se, false), GX + (i - j) * 16, (i + j) * 8);
+      }
+    }
+    // scenery is derived from the tile position, so it needs no saving and stays put
+    this.scenery = [];
+    for (let j = 0; j < MAP; j++) for (let i = 0; i < MAP; i++) {
+      const z = zoneOf(i, j);
+      if (z < 0 || isRoad(i, j)) continue;
+      const h = hash(i, j, s.village.length), r = (h % 1000) / 1000, pick = hash(j, i, 7);
+      const ox = ((h >> 10) % 9 - 4) / 18, oy = ((h >> 14) % 9 - 4) / 18;
+      if (r < 0.22) {
+        const pool = SMALL[g].filter((k) => !(se === 3 && k.startsWith('flowers')));
+        const name = pool[pick % pool.length];
+        const x = i + 0.5 + ox, y = j + 0.5 + oy;
+        draw(ctx, seasonal(propSprite(name, g), se, true), GX + Math.round((x - y) * 16), Math.round((x + y) * 8) + 1);
+      } else if (r < 0.28) {
+        const pool = bigPool(g, z);
+        this.scenery.push({ x: i + 0.5 + ox, y: j + 0.5 + oy, tx: i, ty: j, name: pool[pick % pool.length] });
       }
     }
     this.ground = c;
   }
 
+  private scenery: { x: number; y: number; tx: number; ty: number; name: string }[] = [];
   private emotes = new Map<number, { k: string; t: number }>();
   private lastTime = 0;
 
@@ -152,6 +172,8 @@ export class Renderer {
     const sy = (x: number, y: number) => Math.round(oy + (x + y) * 8);
     const visible = (px: number, py: number) => px > -80 && py > -80 && px < lw + 80 && py < lh + 120;
     const g = villageDef(s.village).ground;
+    const landSe = landSeason(s);
+    const fest = festival(s);
     const list: Drawable[] = [];
     const blit = (sp: Sprite, px: number, py: number) => draw(ctx, sp, px, py);
 
@@ -165,17 +187,27 @@ export class Renderer {
         depth: b.x + b.y + n,
         draw: () => {
           blit(sp, px, py);
+          if (fest && n > 1) this.bunting(px, py, n, Math.max(10, Math.min(22, sp.ay - 18)), fest, time + b.id);
           if (sp.fx) for (const [dx, dy] of sp.fx) this.smoke(px + dx, py + dy, time + b.id * 0.37);
           if (sel) this.diamond(px, py, n, '#ffe066');
         },
       });
       if (this.labels) this.labelQueue.push({ x: px, y: py - sp.ay + 2, text: t('b.' + b.type) + ' ' + b.level });
     }
+    const taken = new Set(s.nodes.map((nd) => nd.y * MAP + nd.x));
+    for (const p of this.scenery) {
+      if (taken.has(p.ty * MAP + p.tx)) continue;
+      const px = sx(p.x, p.y), py = sy(p.x, p.y);
+      if (!visible(px, py)) continue;
+      const sp = seasonal(propSprite(p.name, g), landSe, true);
+      list.push({ depth: p.x + p.y, draw: () => blit(sp, px, py) });
+    }
     for (const nd of s.nodes) {
       const px = sx(nd.x + 0.5, nd.y + 0.5), py = sy(nd.x + 0.5, nd.y + 0.5) + 2;
       if (!visible(px, py)) continue;
-      const sp = nodeSprite(nd.kind, nd.v, g);
-      list.push({ depth: nd.x + nd.y + 1, draw: () => blit(sp, px, py) });
+      const sp = seasonal(nodeSprite(nd.kind, nd.v, g), landSe, true);
+      const age = nd.born == null ? 9 : s.time - nd.born;
+      list.push({ depth: nd.x + nd.y + 1, draw: () => (age < GROW_TIME ? this.growing(sp, px, py, age, nd.kind) : blit(sp, px, py)) });
     }
     for (const m of s.monsters) {
       const px = sx(m.x, m.y), py = sy(m.x, m.y);
@@ -191,7 +223,10 @@ export class Renderer {
         draw: () => {
           if (k > 1) this.ring(px, py, '#ff4a3a');
           else this.shadow(px, py);
+          // newcomers shimmer into view in a few steps
+          if (m.born != null && s.time - m.born < 1) ctx.globalAlpha = 0.25 + 0.25 * Math.floor((s.time - m.born) * 4);
           ctx.drawImage(sp.img, sp.x, sp.y, sp.w, sp.h, px - sp.ax * k, top, sp.w * k, sp.h * k);
+          ctx.globalAlpha = 1;
           if (m.shiny) this.sparkle(px, top, sp.w * k, time + m.id);
           const maxHp = Math.max(1, monsterStats(s, m.type, m).maxHp);
           if (k > 1) {
@@ -224,7 +259,7 @@ export class Renderer {
       const c = s.cat, px = sx(c.x, c.y), py = sy(c.x, c.y);
       if (visible(px, py)) {
         const fr = catFrame(c, time);
-        const sp = catSprite(fr, c.facing < 0);
+        const sp = catSprite(c.coat ?? 'orange', fr, c.facing < 0);
         const sel = this.selected?.kind === 'cat';
         list.push({
           depth: c.x + c.y,
@@ -368,6 +403,50 @@ export class Renderer {
     if (hasPerk(s, 'bell')) { ctx.fillStyle = '#ffd84a'; ctx.fillRect(x, y + 1, 1, 2); }
   }
 
+  // festival pennants strung along the two front eaves of a building
+  private bunting(px: number, py: number, n: number, H: number, fest: string, time: number) {
+    const ctx = this.lctx;
+    const colors = BUNTING[fest] ?? BUNTING.harvest;
+    const W = 16 * n;
+    const segs: [number, number, number, number][] = [[px - W, py + 8 * n - H, px, py + 16 * n - H], [px, py + 16 * n - H, px + W, py + 8 * n - H]];
+    let k = 0;
+    for (const [x0, y0, x1, y1] of segs) {
+      const steps = Math.floor(Math.abs(x1 - x0));
+      for (let i = 1; i < steps; i++) {
+        const f = i / steps;
+        const x = Math.round(x0 + (x1 - x0) * f), y = Math.round(y0 + (y1 - y0) * f + Math.sin(f * Math.PI) * 4);
+        ctx.fillStyle = '#5a4030';
+        ctx.fillRect(x, y, 1, 1);
+        if (i % 4 !== 2) continue;
+        const flap = Math.sin(time * 3 + k) > 0.7 ? 1 : 0;
+        ctx.fillStyle = colors[k++ % colors.length];
+        ctx.fillRect(x - 1, y + 1, 3, 1);
+        ctx.fillRect(x - 1 + flap, y + 2, 2, 1);
+        ctx.fillRect(x + flap, y + 3, 1, 1);
+      }
+    }
+  }
+
+  // a new tree, rock or bush rises out of the ground in four steps, fading in with a little dust
+  private growing(sp: Sprite, px: number, py: number, age: number, kind: string) {
+    const ctx = this.lctx;
+    const step = Math.min(3, Math.floor((age / GROW_TIME) * 4));
+    const f = (step + 1) / 4;
+    const rise = Math.round(sp.h * (1 - f) * (kind === 'tree' ? 0.8 : 0.6));
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px - sp.ax - 2, py - sp.ay - 2, sp.w + 4, sp.ay + 2);
+    ctx.clip();
+    ctx.globalAlpha = 0.35 + 0.65 * f;
+    draw(ctx, sp, px, py + rise);
+    ctx.restore();
+    ctx.fillStyle = kind === 'rock' ? '#b8ab94' : '#c9e88a';
+    for (let i = 0; i < 6 - step * 2; i++) {
+      const a = (i / 6) * Math.PI * 2 + step;
+      ctx.fillRect(Math.round(px + Math.cos(a) * (4 + step * 2)), Math.round(py - 1 + Math.sin(a) * 1.5 - step), 1, 1);
+    }
+  }
+
   private zzz(px: number, py: number, time: number) {
     const ctx = this.lctx;
     ctx.fillStyle = '#e8f0ff';
@@ -489,8 +568,8 @@ export class Renderer {
       if (f.kind === 'score') continue;
       if (f.kind === 'emote') { const [id, k] = String(f.v).split(':'); this.emotes.set(Number(id), { k, t: this.lastTime }); continue; }
       if (this.floaters.length > 120) break;
-      const text = f.kind === 'coin' ? `+${f.v}G` : f.kind === 'lvl' ? 'LV UP' : f.kind === 'item' ? `+${f.v}` : String(f.v);
-      const color = f.kind === 'coin' ? '#ffd34a' : f.kind === 'lvl' ? '#7dffef' : f.kind === 'item' ? '#b6ff7a' : '#ffffff';
+      const text = f.kind === 'coin' ? `+${f.v}G` : f.kind === 'lvl' ? 'LV UP' : f.kind === 'item' ? `+${f.v}` : f.kind === 'skill' ? t('sk.' + f.v) : String(f.v);
+      const color = f.kind === 'coin' ? '#ffd34a' : f.kind === 'lvl' ? '#7dffef' : f.kind === 'item' ? '#b6ff7a' : f.kind === 'skill' ? '#ff9ae8' : '#ffffff';
       this.floaters.push({ x: f.x, y: f.y, text, color, t: 0 });
     }
     s.fx.length = 0;
@@ -517,6 +596,38 @@ export class Renderer {
 }
 
 
+const GROW_TIME = 1.6;
+
+const hash = (i: number, j: number, k: number) => {
+  let h = (i * 374761393 + j * 668265263 + k * 2246822519) >>> 0;
+  h = Math.imul(h ^ (h >>> 13), 1274126177) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+};
+const SMALL: Record<string, string[]> = {
+  meadow: ['flowers0', 'flowers1', 'flowers2', 'flowers3', 'flowers4', 'flowers0', 'flowers2', 'tuft', 'tuft', 'tuft', 'pebbles', 'mushrooms'],
+  rocky: ['pebbles', 'pebbles', 'tuft', 'flowers0', 'flowers1', 'tuft'],
+  marsh: ['tuft', 'tuft', 'mushrooms', 'flowers3', 'flowers4', 'pebbles'],
+  snow: ['pebbles', 'tuft', 'pebbles', 'flowers3'],
+  sand: ['pebbles', 'bones', 'tuft', 'pebbles'],
+};
+// nearer the village the land looks lived-in; farther out it grows wild and old
+function bigPool(g: string, z: number): string[] {
+  const base = [['stump', 'fence', 'boulder', 'fern', 'stump', 'fern', 'boulder', 'fence', 'stump', 'sign'], ['log', 'boulder', 'fern', 'stump', 'log'], ['pillar', 'deadTree', 'crystal', 'boulder', 'log', 'deadTree']][z];
+  const swap: Record<string, Record<string, string>> = {
+    sand: { fern: 'cactus', stump: 'cactus', log: 'bones', fence: 'cactus' },
+    marsh: { fern: 'reeds', fence: 'reeds' },
+    snow: { fern: 'boulder' },
+  };
+  return base.map((k) => swap[g]?.[k] ?? k);
+}
+
+const BUNTING: Record<string, string[]> = {
+  flower: ['#ff9ac0', '#ffffff', '#ffd0e0', '#b8e890'],
+  fireworks: ['#ff5a5a', '#4aa8ff', '#ffd34a', '#ffffff'],
+  harvest: ['#f08a2a', '#ffd34a', '#7ac850', '#d8502a'],
+  lantern: ['#e83a3a', '#ffd34a', '#ffffff', '#e83a3a'],
+};
+
 const shinyCache = new Map<string, Sprite>();
 function shinySprite(sp: Sprite, key: string): Sprite {
   let out = shinyCache.get(key);
@@ -536,7 +647,7 @@ function shinySprite(sp: Sprite, key: string): Sprite {
 // picks the animation frame for what the cat is doing
 function catFrame(c: Cat, time: number): string {
   switch (c.act) {
-    case 'walk': case 'follow': return c.path.length || c.act === 'follow' ? `walk${Math.floor(time * 8) % 4}` : 'sit0';
+    case 'walk': case 'follow': return c.path.length ? `walk${Math.floor(time * 8) % 4}` : 'sit0';
     case 'sleep': return `sleep${Math.floor(time * 0.8) % 2}`;
     case 'groom': return `groom${Math.floor(time * 2.5) % 2}`;
     case 'stretch': return 'stretch';
@@ -544,4 +655,10 @@ function catFrame(c: Cat, time: number): string {
     case 'happy': return 'happy';
     default: return time % 4 < 0.15 ? 'blink' : Math.floor(time * 1.2) % 3 === 0 ? 'sit1' : 'sit0';
   }
+}
+
+// the snowfield village is white all year, so only greener grounds change with the seasons
+function landSeason(s: GameState) {
+  const g = villageDef(s.village).ground;
+  return g === 'snow' || g === 'sand' ? -1 : season(s);
 }

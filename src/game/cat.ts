@@ -12,6 +12,8 @@ export const catTouristBonus = (s: GameState) => (s.cat ? 0.01 * s.cat.lv : 0);
 export const CAT_PERKS: [string, number][] = [['visitors', 1], ['gifts', 3], ['lucky', 5], ['ribbon', 7], ['bell', 10]];
 export const hasPerk = (s: GameState, k: string) => !!s.cat && s.cat.lv >= CAT_PERKS.find((p) => p[0] === k)![1];
 export const LUCKY_BONUS = 0.15;
+// each village's cat turns up in its own coat
+export const CAT_COATS = ['orange', 'gray', 'black', 'tuxedo', 'white', 'calico', 'siamese', 'brown', 'cream'];
 
 const SPEED = 1.3;
 
@@ -66,6 +68,9 @@ function decide(s: GameState, c: Cat) {
       c.target = pick(near).id;
       c.act = 'follow';
       c.timer = rand(8, 14);
+      c.at = null;
+      c.rp = 0;
+      c.path = [];
       return;
     }
     case 'nap': return setAct(c, 'sleep', rand(10, 20));
@@ -103,12 +108,15 @@ export function catTick(s: GameState, dt: number) {
   if (c.act === 'follow') {
     const n = s.npcs.find((o) => o.id === c.target);
     if (!n || n.inside != null || c.timer <= 0) { c.target = null; setAct(c, 'sit', rand(2, 4)); return; }
-    const d = dist(n.x, n.y, c.x, c.y);
-    if (d > 1.2) {
-      const k = Math.min(1, (SPEED * 1.2 * dt) / d);
-      if (Math.abs(n.x - c.x - (n.y - c.y)) > 0.01) c.facing = n.x - c.x - (n.y - c.y) > 0 ? 1 : -1;
-      c.x += (n.x - c.x) * k; c.y += (n.y - c.y) * k;
+    // trots along the streets behind them, re-routing now and then as they move
+    c.rp = (c.rp ?? 0) - dt;
+    if (dist(n.x, n.y, c.x, c.y) <= 1.2) { c.path = []; return; }
+    if (c.rp <= 0) {
+      c.rp = 1;
+      c.path = findPath(s, Math.floor(c.x), Math.floor(c.y), Math.floor(n.x), Math.floor(n.y));
+      c.path.pop();
     }
+    step(c, dt * 1.2);
     return;
   }
   if (c.act === 'sleep' && isNight(s)) { c.timer = Math.max(c.timer, 1); return; }
@@ -116,16 +124,24 @@ export function catTick(s: GameState, dt: number) {
   if (npcPetTimer > 3 && (c.act === 'sit' || c.act === 'lie')) {
     npcPetTimer = 0;
     const n = s.npcs.find((o) => o.inside == null && o.role !== 'fighter' && dist(o.x, o.y, c.x, c.y) < 1.3);
-    if (n && chance(0.25)) { emote(s, n, 'heart'); catGain(s, 0.5); setAct(c, 'happy', 2); return; }
+    if (n && chance(0.25)) { emote(s, n, 'heart'); setAct(c, 'happy', 2); return; }
   }
   if (c.timer <= 0) decide(s, c);
 }
+
+// only the first few pets each day count toward affection, so it grows with steady attention rather than tapping
+export const PETS_PER_DAY = 3;
+export const petsLeft = (s: GameState) => (s.cat && s.cat.petDay === s.day ? Math.max(0, PETS_PER_DAY - (s.cat.petN ?? 0)) : PETS_PER_DAY);
 
 export function petCat(s: GameState): boolean {
   const c = s.cat;
   if (!c || s.time - c.petT < 3) return false;
   c.petT = s.time;
-  catGain(s, 2);
+  if (petsLeft(s) > 0) {
+    if (c.petDay !== s.day) { c.petDay = s.day; c.petN = 0; }
+    c.petN = (c.petN ?? 0) + 1;
+    catGain(s, 2);
+  }
   setAct(c, 'happy', 2.5);
   return true;
 }
@@ -135,14 +151,14 @@ export function catDaily(s: GameState) {
   if (!s.cat) {
     if (s.day < 3) return;
     const d = doorOf(guild(s));
-    s.cat = { x: d.x + 0.5, y: d.y + 0.5, path: [], act: 'sit', timer: 5, facing: 1, lv: 1, exp: 0, fed: -1, petT: -99, at: null, target: null, since: s.day };
+    s.cat = { x: d.x + 0.5, y: d.y + 0.5, path: [], act: 'sit', timer: 5, facing: 1, lv: 1, exp: 0, fed: -1, petT: -99, at: null, target: null, since: s.day, coat: pick(CAT_COATS) };
     log(s, 'log.catArrive');
     note(s, 'log.catArrive');
     return;
   }
   const c = s.cat;
   const food = (s.items.meat ?? 0) > 0 ? 'meat' : (s.items.fruit ?? 0) > 0 ? 'fruit' : null;
-  if (food && c.fed !== s.day) { s.items[food]--; c.fed = s.day; catGain(s, 1); }
+  if (food && c.fed !== s.day) { s.items[food]--; c.fed = s.day; catGain(s, 0.1); }
   if (hasPerk(s, 'gifts') && chance(0.15)) {
     const pool = s.disc.filter((k) => ITEMS[k] && !BASE_ITEMS.includes(k));
     const rare = hasPerk(s, 'bell') && chance(0.3);

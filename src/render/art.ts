@@ -53,9 +53,10 @@ export function draw(ctx: CanvasRenderingContext2D, s: Sprite, px: number, py: n
 export const tileSprite = (g: Ground, kind: TileKind, v: number) => get(`tile/${g}/${kind}/${v % 6}`);
 export const buildingSprite = (type: string, flip = false) => get(`bld/${type}`, flip);
 export const nodeSprite = (kind: NodeKind, v: number, g: Ground) => get(`node/${kind}/${v % (kind === 'tree' ? 4 : 2)}/${g}`);
-export const catSprite = (frame: string, flip: boolean) => get(`cat/${frame}`, flip);
-export const catNeck = (frame: string): [number, number] => (frames[`cat/${frame}`] as Frame & { neck?: [number, number] })?.neck ?? [8, 9];
-export const catIcon = () => iconOf('cat/sit0');
+export const propSprite = (name: string, g: Ground) => get(`prop/${name}/${g}`);
+export const catSprite = (coat: string, frame: string, flip: boolean) => get(`cat/${coat}/${frame}`, flip);
+export const catNeck = (frame: string): [number, number] => (frames[`cat/orange/${frame}`] as Frame & { neck?: [number, number] })?.neck ?? [8, 9];
+export const catIcon = (coat = 'orange') => iconOf(`cat/${coat}/sit0`);
 export const monsterSprite = (type: string, frame: number, flip: boolean) => get(`m/${type}/${frame}`, flip);
 
 let sheetPixels: Uint8ClampedArray | null = null;
@@ -145,4 +146,66 @@ export function humanIcon(role: Role, cls: Cls, look: Look): string {
   let url = humanIcons.get(key);
   if (!url) { url = (humanSprite(role, cls, look, 0, false).img as HTMLCanvasElement).toDataURL(); humanIcons.set(key, url); }
   return url;
+}
+
+// ---------- seasons ----------
+
+function hsl(r: number, g: number, b: number): [number, number, number] {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return [0, 0, l];
+  const s = d / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [h * 60, s, l];
+}
+
+function rgb(h: number, s: number, l: number): [number, number, number] {
+  const c = (1 - Math.abs(2 * l - 1)) * s, x = c * (1 - Math.abs(((h / 60) % 2) - 1)), m = l - c / 2;
+  const [r, g, b] = h < 60 ? [c, x, 0] : h < 120 ? [x, c, 0] : h < 180 ? [0, c, x] : h < 240 ? [0, x, c] : h < 300 ? [x, 0, c] : [c, 0, x];
+  return [Math.round((r + m) * 255), Math.round((g + m) * 255), Math.round((b + m) * 255)];
+}
+
+const LEAF_HUES = [26, 10, 42, 18];
+const clamp = (v: number) => Math.max(0, Math.min(1, v));
+
+// only greens are touched: autumn turns grass golden and leaves to reds and ambers, winter lays snow over both
+function recolor(r: number, g: number, b: number, se: number, leaf: boolean, tone: number): [number, number, number] | null {
+  const [h, s, l] = hsl(r, g, b);
+  if (h < 55 || h > 175 || s < 0.12 || l < 0.06) return null;
+  if (se === 2) {
+    if (leaf) return rgb(LEAF_HUES[tone % 4], clamp(Math.max(s, 0.55) * 1.05), clamp(l * 1.04));
+    return rgb(44 + (h - 100) * 0.08, s * 0.8, clamp(l * 1.03));
+  }
+  if (leaf) return l > 0.36 ? rgb(212, 0.3, clamp(0.84 + (l - 0.36) * 0.3)) : rgb(160, s * 0.45, l * 0.9);
+  return rgb(212, 0.32, clamp(0.72 + l * 0.32));
+}
+
+const seasonCache = new Map<string, Sprite>();
+export function seasonal(sp: Sprite, se: number, leaf: boolean): Sprite {
+  if (se !== 2 && se !== 3) return sp;
+  if (sp.img !== sheet || !sheetPixels) return sp;
+  const key = `${sp.x},${sp.y},${sp.w},${sp.h},${se},${leaf ? 1 : 0}`;
+  let out = seasonCache.get(key);
+  if (!out) {
+    const c = makeCanvas(sp.w, sp.h);
+    const cx = c.getContext('2d')!;
+    const id = cx.createImageData(sp.w, sp.h);
+    const tone = (sp.x * 7 + sp.y * 13) >> 3;
+    for (let y = 0; y < sp.h; y++) {
+      for (let x = 0; x < sp.w; x++) {
+        const i = ((sp.y + y) * sheet.width + sp.x + x) * 4, o = (y * sp.w + x) * 4;
+        const a = sheetPixels[i + 3];
+        if (!a) continue;
+        const v = recolor(sheetPixels[i], sheetPixels[i + 1], sheetPixels[i + 2], se, leaf, tone);
+        id.data[o] = v ? v[0] : sheetPixels[i];
+        id.data[o + 1] = v ? v[1] : sheetPixels[i + 1];
+        id.data[o + 2] = v ? v[2] : sheetPixels[i + 2];
+        id.data[o + 3] = a;
+      }
+    }
+    cx.putImageData(id, 0, 0);
+    out = { ...sp, img: c, x: 0, y: 0 };
+    seasonCache.set(key, out);
+  }
+  return out;
 }

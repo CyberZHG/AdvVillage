@@ -3,9 +3,10 @@ import { MONSTERS, villageDef, zoneMonsters } from './data';
 import { expNeed, gainExp } from './level';
 import { addItem, mods } from './state';
 import { pick, weighted } from './util';
+import { researchSkip } from './research';
 import type { GameState } from './types';
 
-export interface OfflineReport { sec: number; money: number; levels: number; items: [string, number][] }
+export interface OfflineReport { sec: number; money: number; levels: number; items: [string, number][]; research: string[] }
 
 const CAP = 8 * 3600;
 // an hour away is worth about nine game days of normal running, up to forty
@@ -37,5 +38,6 @@ export function settleOffline(s: GameState): OfflineReport | null {
     add(item, Math.max(1, Math.round(mods(s).drops)));
   }
   const items = [...got.entries()].sort((a, b) => b[1] - a[1]);
-  return { sec, money, levels, items };
+  const research = researchSkip(s, days * DAY);
+  return { sec, money, levels, items, research };
 }
