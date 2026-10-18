@@ -6,7 +6,7 @@ import { PAX, PAY, PH, PW, compose, layerNames, lookColors, type Layer } from '.
 export interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number; fx?: number[][]; tint?: string }
 export interface Sprite extends Frame { img: CanvasImageSource }
 
-export type TileKind = 'wild0' | 'wild1' | 'wild2' | 'village' | 'road' | 'street';
+export type TileKind = 'wild0' | 'wild1' | 'wild2' | 'village' | 'road' | 'street' | 'st1' | 'st2' | 'st3' | 'st4' | 'st5' | 'water' | 'ice' | 'bog' | 'bridgeX' | 'bridgeY' | 'sbridgeX' | 'sbridgeY' | 'vent';
 export const TILE_H = 22;
 
 let sheet: HTMLImageElement;
@@ -43,7 +43,7 @@ function get(name: string, flip = false): Sprite {
   const f = frames[name] ?? MISSING;
   if (!flip) return { img: sheet, ...f };
   // odd widths anchor on a pixel centre, even widths on the boundary between two pixels
-  return { img: flippedSheet, x: sheetW - f.x - f.w, y: f.y, w: f.w, h: f.h, ax: f.w - f.ax - (f.w % 2), ay: f.ay, fx: f.fx?.map(([dx, dy]) => [-dx, dy]) };
+  return { img: flippedSheet, x: sheetW - f.x - f.w, y: f.y, w: f.w, h: f.h, ax: f.w - f.ax - (f.w % 2), ay: f.ay, fx: f.fx?.map(([dx, ...rest]) => [-dx, ...rest]) };
 }
 
 export function draw(ctx: CanvasRenderingContext2D, s: Sprite, px: number, py: number) {
@@ -52,8 +52,17 @@ export function draw(ctx: CanvasRenderingContext2D, s: Sprite, px: number, py: n
 
 export const tileSprite = (g: Ground, kind: TileKind, v: number) => get(`tile/${g}/${kind}/${v % 6}`);
 export const buildingSprite = (type: string, flip = false) => get(`bld/${type}`, flip);
+export const buildingLit = (type: string, flip = false) => (frames[`bld/${type}/lit`] ? get(`bld/${type}/lit`, flip) : null);
+export const sailSprite = (f: number, flip = false) => get(`bld/windmill/sail/${f % 4}`, flip);
 export const nodeSprite = (kind: NodeKind, v: number, g: Ground) => get(`node/${kind}/${v % (kind === 'tree' ? 4 : 2)}/${g}`);
 export const propSprite = (name: string, g: Ground) => get(`prop/${name}/${g}`);
+export const localTreeSprite = (kind: string, se: number) => get(`tree/${kind}/${se}`);
+export const bankSprite = (g: Ground, tag: string, d: number, v: number) => get(`bank/${g}/${tag}/${d}/${v % 2}`);
+export const rampSprite = (g: Ground, tag: string, d: number) => get(`ramp/${g}/${tag}/${d}`);
+export const cliffSprite = (g: Ground, v: number) => get(`cliff/${g}/${v}`);
+export const fallSprite = (g: Ground, v: number) => get(`cliff/${g}/fall${v}`);
+export const spriteNamed = (name: string) => get(name);
+export const terrainSprite = (kind: 'rock' | 'thicket' | 'cave' | 'bamboo', v: number, g: Ground) => get(`ter/${kind}/${v % 3}/${g}`);
 export const catSprite = (coat: string, frame: string, flip: boolean) => get(`cat/${coat}/${frame}`, flip);
 export const catNeck = (frame: string): [number, number] => (frames[`cat/orange/${frame}`] as Frame & { neck?: [number, number] })?.neck ?? [8, 9];
 export const catIcon = (coat = 'orange') => iconOf(`cat/${coat}/sit0`);
@@ -140,6 +149,9 @@ function iconOf(name: string, flip = false): string {
 export const itemIcon = (item: string) => iconOf(`i/${item}`);
 export const monsterIcon = (type: string) => iconOf(`m/${type}/0`);
 export const buildingIcon = (type: string) => iconOf(`bld/${type}`);
+export const uiIcon = (name: string) => iconOf(`ui/${name}`);
+export const uiSprite = (name: string) => get(`ui/${name}`);
+export const tileIcon = (g: string, style: number) => iconOf(`tile/${g}/${style ? 'st' + style : 'street'}/0`);
 const humanIcons = new Map<string, string>();
 export function humanIcon(role: Role, cls: Cls, look: Look): string {
   const key = lookKey(look, 0);

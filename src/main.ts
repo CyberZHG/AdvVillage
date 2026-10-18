@@ -1,20 +1,20 @@
 import './ui/style.css';
 import { detectLang, getLang, setLang, t } from './i18n';
 import { loadArt } from './render/art';
-import { Renderer } from './render/renderer';
+import { Renderer, type Crowd } from './render/renderer';
 import { drawExpBar } from './render/expbar';
 import { newGame } from './game/state';
 import { step } from './game/sim';
 import { TICK } from './game/constants';
-import { VILLAGES } from './game/data';
+import { VILLAGES, setCulture } from './game/data';
 import { deleteSave, exportAll, hasSave, importAll, loadGame, loadMeta, saveGame, saveMeta } from './game/save';
 import { checkAchievements } from './game/achievements';
 import { log } from './game/state';
 import { download, makeReportImage, makeShareImage, shareImage, toBlob } from './ui/share';
 import { buyOffer, currentBoss } from './game/events';
-import { build, canBuild, demolish, expand, forgeUpgrade, launchExpedition, placeRoad, removeRoad, upgrade } from './game/econ';
+import { advanceWonder, build, canBuild, clearTerrain, demolish, expand, forgeUpgrade, launchExpedition, placeRoad, removeRoad, upgrade } from './game/econ';
 import { bld } from './game/state';
-import { offlineHtml, setChartKind, setForgeSlot } from './ui/ui';
+import { offlineHtml, roadStyle, setChartKind, setForgeSlot, setRoadStyle } from './ui/ui';
 import { queueResearch, startResearch, unqueueResearch } from './game/research';
 import type { AutoKey } from './game/auto';
 import { petCat } from './game/cat';
@@ -33,10 +33,13 @@ blockZoom();
 registerSW();
 const meta = loadMeta();
 setLang(detectLang(meta.lang));
+setCulture(getLang());
 
 const renderer = new Renderer($('game') as HTMLCanvasElement);
+renderer.crowd = (meta.crowd as Crowd) ?? 'all';
 let s: GameState | null = null;
-let speed = 1;
+let speed = 2;
+let resumeSpeed = 2;
 let tab: Tab | null = null;
 let hudHeld = false;
 
@@ -84,7 +87,8 @@ function startGame(village: string, fresh: boolean) {
   resetHtmlCache();
   renderer.cam.zoom = renderer.defaultZoom();
   renderer.centerOn(32, 32);
-  speed = 1;
+  speed = 2;
+  renderer.fast = false;
   last = performance.now();
   achievements();
   refresh();
@@ -142,7 +146,7 @@ function act(a: string) {
   switch (cmd) {
     case 'tab': tab = tab === x ? null : (x as Tab); break;
     case 'close': tab = null; break;
-    case 'speed': speed = Number(x); break;
+    case 'speed': speed = Number(x); renderer.fast = speed >= 4; break;
     case 'place':
       renderer.ghost = x;
       renderer.selected = null;
@@ -196,8 +200,16 @@ function act(a: string) {
     case 'goods': { const b = bld(s!, Number(x)); if (b) b.goodsOff = !b.goodsOff; break; }
     case 'expedition': if (launchExpedition(s!, x)) toast(t('log.expRecruit', { loc: '@ex.' + x })); break;
     case 'expand': if (!expand(s!)) toast(t('ui.notEnough')); break;
+    case 'rstyle': setRoadStyle(Number(x)); break;
+    case 'wonder': { const b = bld(s!, Number(x)); if (b && !advanceWonder(s!, b)) toast(t('ui.notEnough')); break; }
+    case 'crowd':
+      renderer.crowd = x as Crowd;
+      meta.crowd = x;
+      saveMeta(meta);
+      break;
     case 'lang':
       setLang(x);
+      setCulture(x);
       meta.lang = x;
       saveMeta(meta);
       resetHtmlCache();
@@ -251,7 +263,7 @@ let dragging = false;
 let pinchDist = 0;
 let paintFrom: { x: number; y: number } | null = null;
 
-const isRoadTool = () => renderer.ghost === 'road' || renderer.ghost === 'unroad';
+const isRoadTool = () => renderer.ghost === 'road' || renderer.ghost === 'unroad' || renderer.ghost === 'clear';
 
 // paints every tile on the line between the previous and current pointer tile so fast drags leave no gaps
 function paintTo(cx: number, cy: number) {
@@ -264,7 +276,8 @@ function paintTo(cx: number, cy: number) {
   for (let i = 0; i <= steps; i++) {
     const x = Math.round(from.x + ((to.x - from.x) * i) / Math.max(1, steps));
     const y = Math.round(from.y + ((to.y - from.y) * i) / Math.max(1, steps));
-    if (renderer.ghost === 'road') { if (!placeRoad(s, x, y) && s.money < 10) poor = true; }
+    if (renderer.ghost === 'road') { if (!placeRoad(s, x, y, roadStyle()) && s.money < 10) poor = true; }
+    else if (renderer.ghost === 'clear') clearTerrain(s, x, y);
     else removeRoad(s, x, y);
   }
   if (poor) toast(t('ui.notEnough'));
@@ -327,8 +340,8 @@ canvas.addEventListener('wheel', (e) => { e.preventDefault(); renderer.zoomBy(e.
 window.addEventListener('keydown', (e) => {
   if (!s) return;
   if (e.key === 'Escape') { renderer.ghost = null; renderer.selected = null; tab = null; }
-  else if (e.key === ' ') { speed = speed ? 0 : 1; e.preventDefault(); }
-  else if (['1', '2', '3', '4'].includes(e.key)) speed = [1, 2, 4, 8][Number(e.key) - 1];
+  else if (e.key === ' ') { if (speed) resumeSpeed = speed; speed = speed ? 0 : resumeSpeed; renderer.fast = speed >= 4; e.preventDefault(); }
+  else if (['1', '2', '3', '4'].includes(e.key)) { speed = [1, 2, 4, 8][Number(e.key) - 1]; renderer.fast = speed >= 4; }
   else if (e.key === 'r' || e.key === 'R') renderer.ghostRot = 1 - renderer.ghostRot;
   refresh();
 });

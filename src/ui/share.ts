@@ -3,6 +3,7 @@ import { ACHIEVEMENTS } from '../game/achievements';
 import { computeScore } from '../game/econ';
 import { residents } from '../game/state';
 import { makeCanvas } from '../render/pixel';
+import { uiSprite } from '../render/art';
 import type { GameState } from '../game/types';
 import type { Meta } from '../game/save';
 import { dateText } from './ui';
@@ -107,8 +108,10 @@ export async function makeReportImage(s: GameState, i: number): Promise<HTMLCanv
   ];
   stats.forEach(([k, v], j) => { const x = 60 + (j % 3) * 370, y = 190 + Math.floor(j / 3) * 70; text(k, x, y, 22, '#7a6a50'); text(v, x, y + 34, 34); });
   let y = 360;
-  if (r.star) { text('⭐ ' + t('ui.rStar', { n: npcName(r.star.name), c: '@cls.' + r.star.cls, k: r.star.kills, lv: r.star.level }), 60, y, 24); y += 40; }
-  if (r.shop) { text('🏆 ' + t('ui.rShop', { b: '@b.' + r.shop.type, v: r.shop.income }), 60, y, 24); y += 40; }
+  // pixel icons drawn three times their size in front of the line
+  const icon = (name: string, yy: number) => { const sp = uiSprite(name); ctx.imageSmoothingEnabled = false; ctx.drawImage(sp.img, sp.x, sp.y, sp.w, sp.h, 56, yy - 28, sp.w * 3, sp.h * 3); };
+  if (r.star) { icon('star', y); text(t('ui.rStar', { n: npcName(r.star.name), c: '@cls.' + r.star.cls, k: r.star.kills, lv: r.star.level }), 100, y, 24); y += 40; }
+  if (r.shop) { icon('trophy', y); text(t('ui.rShop', { b: '@b.' + r.shop.type, v: r.shop.income }), 100, y, 24); y += 40; }
   for (const e of r.events.slice(-4)) { text('・' + t(e.k, e.p), 60, y, 20, '#5a4a30'); y += 32; }
   text(shareUrl(), W - 40, H - 30, 22, '#3a6a9a', 'right');
   ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 4; ctx.strokeRect(14, 14, W - 28, H - 28);

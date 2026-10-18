@@ -31,7 +31,7 @@ export function settleOffline(s: GameState): OfflineReport | null {
   const gatherers = s.npcs.filter((n) => n.role === 'gatherer').length;
   for (const k of ['wood', 'stone', 'fruit']) add(k, Math.round(gatherers * days * 6));
   const ground = villageDef(s.village).ground;
-  const pool = [0, 1, 2].flatMap((z) => zoneMonsters(z, ground));
+  const pool = [0, 1, 2].flatMap((z) => zoneMonsters(z, ground, s.village));
   const kills = Math.min(3000, Math.round(fighters.length * days * 2));
   for (let i = 0; i < kills && pool.length; i++) {
     const item = weighted(MONSTERS[pick(pool)].drops, (d) => d[1])![0];

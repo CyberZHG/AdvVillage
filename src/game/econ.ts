@@ -1,13 +1,15 @@
 import { DAY, EXPANSIONS } from './constants';
 import { comboIncome, discoverCombos } from './combos';
-import { ROAD_COST, BUILDINGS, EQUIP, EXPEDITIONS, ITEMS, equipByKey, shopTier, type Cost, type Slot } from './data';
+import { ROAD_COST, BUILDINGS, WONDER_STAGES, bldAvailable, finished, villageDef, wonderCost, EQUIP, EXPEDITIONS, ITEMS, equipByKey, shopTier, type Cost, type Slot } from './data';
 import { hasEffect, hotNow } from './events';
 import { rbonus } from './research';
 import { LUCKY_BONUS, luckyAt } from './cat';
 import { lvMult } from './level';
 import { bldExpNeed, gainExp } from './level';
-import { assignHousing, fx, log, mods, newId, ofKind, residents, year } from './state';
-import { doorOf, invalidateGrid, covers, placement, setRoad, syncBounds, villageDist } from './world';
+import { assignHousing, fx, log, mods, newId, note, ofKind, residents, year } from './state';
+import { addFame } from './fame';
+import { BOG, ROCK, THICKET, WATER, doorOf, invalidateGrid, covers, isRoad, placement, roadState, setRoad, syncBounds, terrainAt, villageDist } from './world';
+import { MAP } from './constants';
 import type { Building, GameState, Score } from './types';
 
 export function earn(s: GameState, b: Building, amount: number) {
@@ -54,6 +56,9 @@ export function canBuild(s: GameState, type: string): boolean {
   const d = BUILDINGS[type];
   if (d.buildable === false) return false;
   if (d.unique && s.buildings.some((b) => b.type === type)) return false;
+  if (!bldAvailable(s, type)) return false;
+  // wonders open up once the village has been widened as far as it goes
+  if (d.wonder && (s.vlv ?? 0) < EXPANSIONS.length) return false;
   return hasCost(s, buildCost(s, type));
 }
 
@@ -62,6 +67,7 @@ export function build(s: GameState, type: string, x: number, y: number, pref = 0
   if (!canBuild(s, type) || !pl) return false;
   payCost(s, buildCost(s, type));
   const b: Building = { id: newId(s), type, x, y, rot: pl.rot, door: pl.door, level: 1, exp: 0 };
+  if (BUILDINGS[type].wonder) b.stage = 0;
   s.buildings.push(b);
   s.nodes = s.nodes.filter((n) => !covers(b, n.x, n.y));
   invalidateGrid();
@@ -71,14 +77,75 @@ export function build(s: GameState, type: string, x: number, y: number, pref = 0
   return true;
 }
 
-export function placeRoad(s: GameState, x: number, y: number): boolean {
-  if (s.money < ROAD_COST || !setRoad(s, x, y, true)) return false;
-  s.money -= ROAD_COST;
+// bridges take timber and coin; boardwalks over bog and trails through thicket cost a little more than paving
+export function roadCost(x: number, y: number): Cost {
+  const k = terrainAt(x, y);
+  return k === WATER ? { money: ROAD_COST * 8, wood: 12 } : k ? { money: ROAD_COST * 3, wood: 2 } : { money: ROAD_COST };
+}
+
+// painting over an existing street only changes its paving
+export function canAdvance(s: GameState, b: Building) {
+  if (finished(b)) return false;
+  const c = wonderCost(b.type, (b.stage ?? 0) + 1);
+  return hasCost(s, c) && (s.items[c.mat] ?? 0) >= c.count;
+}
+
+// raise a wonder one stage; the last one completes it
+export function advanceWonder(s: GameState, b: Building): boolean {
+  if (!canAdvance(s, b)) return false;
+  const c = wonderCost(b.type, (b.stage ?? 0) + 1);
+  payCost(s, c);
+  s.items[c.mat] -= c.count;
+  b.stage = (b.stage ?? 0) + 1;
+  if (finished(b)) {
+    addFame(s, 40);
+    log(s, 'log.wonderDone', { b: '@b.' + b.type });
+    note(s, 'log.wonderDone', { b: '@b.' + b.type });
+  } else log(s, 'log.wonderStage', { b: '@b.' + b.type, k: b.stage, n: WONDER_STAGES });
+  return true;
+}
+
+export function placeRoad(s: GameState, x: number, y: number, style = villageDef(s.village).road): boolean {
+  const i = y * MAP + x;
+  s.rstyle ??= {};
+  if (isRoad(x, y)) {
+    if ((s.rstyle[i] ?? villageDef(s.village).road) === style || s.money < ROAD_COST) return false;
+    s.money -= ROAD_COST;
+    s.rstyle[i] = style;
+    roadState.version++;
+    return true;
+  }
+  const c = roadCost(x, y);
+  if (!hasCost(s, c) || !setRoad(s, x, y, true)) return false;
+  payCost(s, c);
+  s.rstyle[i] = style;
   s.nodes = s.nodes.filter((n) => n.x !== x || n.y !== y);
   return true;
 }
 
-export const removeRoad = (s: GameState, x: number, y: number) => setRoad(s, x, y, false);
+// clearing land: cut back thicket for timber, fill a bog with stone, blast rock apart for stone
+export const CLEAR_COST: Record<number, { cost: Cost; gain?: [string, number] }> = {
+  [THICKET]: { cost: { money: 60 }, gain: ['wood', 8] },
+  [BOG]: { cost: { money: 80, stone: 10 } },
+  [ROCK]: { cost: { money: 150 }, gain: ['stone', 12] },
+};
+export function clearTerrain(s: GameState, x: number, y: number): boolean {
+  const k = terrainAt(x, y), c = CLEAR_COST[k];
+  if (!c || !s.terrain || !hasCost(s, c.cost) || s.buildings.some((b) => covers(b, x, y))) return false;
+  payCost(s, c.cost);
+  const i = y * MAP + x, key = k === THICKET ? 'thicket' : k === BOG ? 'bog' : 'rock';
+  s.terrain[key] = s.terrain[key].filter((j) => j !== i);
+  if (c.gain) s.items[c.gain[0]] = (s.items[c.gain[0]] ?? 0) + c.gain[1];
+  syncBounds(s);
+  roadState.version++;
+  return true;
+}
+
+export function removeRoad(s: GameState, x: number, y: number) {
+  if (!setRoad(s, x, y, false)) return false;
+  if (s.rstyle) delete s.rstyle[y * MAP + x];
+  return true;
+}
 
 export function upgradeCost(s: GameState, b: Building): Cost {
   const base = BUILDINGS[b.type].cost;

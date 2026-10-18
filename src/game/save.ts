@@ -1,4 +1,4 @@
-import { baseRoads, doorOf, syncBounds, syncRoads } from './world';
+import { baseRoads, doorOf, makeTerrain, syncBounds, syncBuried, syncRoads } from './world';
 import { MAP } from './constants';
 import { BUILDINGS, MONSTERS, VILLAGES, villageMods } from './data';
 import { decode, encode } from './codec';
@@ -10,7 +10,7 @@ import { PROMOTE_LEVEL } from './constants';
 const KEY = 'advvillage.save.';
 const META = 'advvillage.meta';
 
-export interface Meta { unlocked: number; best: Record<string, number>; lang?: string; ach: Record<string, number> }
+export interface Meta { unlocked: number; best: Record<string, number>; lang?: string; ach: Record<string, number>; crowd?: string }
 
 function storage(): Storage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; }
@@ -44,8 +44,25 @@ function restore(s: GameState): GameState {
   s.histBase ??= { e: s.stats.earned ?? 0, t: s.stats.tourists, k: s.stats.kills };
   for (const n of s.npcs) if (n.role === 'fighter' && n.level >= PROMOTE_LEVEL && !n.promoted) { n.promoted = true; n.look.cape = true; }
   s.stats.earned ??= 0; s.stats.commissions ??= 0; s.stats.goods ??= 0; s.stats.fk ??= {};
+  if (!s.terrain) {
+    // older villages get their terrain too, minus any tiles already built on; roads keep crossing it as bridges and trails
+    const covered = new Set(s.buildings.flatMap((b) => { const n = BUILDINGS[b.type].size, o: number[] = []; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) o.push((b.y + j) * MAP + b.x + i); return o; }));
+    const roads = new Set(s.roads ?? []);
+    const tr = makeTerrain(s.village);
+    s.terrain = { water: tr.water.filter((i) => !covered.has(i)), rock: tr.rock.filter((i) => !covered.has(i) && !roads.has(i)), bog: tr.bog.filter((i) => !covered.has(i)), thicket: tr.thicket.filter((i) => !covered.has(i)) };
+    const solid = new Set([...s.terrain.water, ...s.terrain.rock]);
+    s.nodes = s.nodes.filter((n) => !solid.has(n.y * MAP + n.x));
+  }
+  if (!s.terrain.vent) {
+    // vents, caves and flower meadows arrived later; add them where nothing stands
+    const tr = makeTerrain(s.village), busy = new Set([...(s.roads ?? []), ...s.buildings.map((b) => b.y * MAP + b.x)]);
+    s.terrain.vent = (tr.vent ?? []).filter((i) => !busy.has(i));
+    s.terrain.cave = (tr.cave ?? []).filter((i) => !busy.has(i));
+    s.terrain.flowers = tr.flowers ?? [];
+  }
   syncBounds(s);
   if (!s.roads) migrateRoads(s);
+  syncBuried(s.buried);
   migrateMonstersAndLooks(s);
   if ((s.v ?? 1) < 3) {
     for (const n of s.npcs) if (n.role !== 'tourist') recolor(n.look, n.role, n.cls);

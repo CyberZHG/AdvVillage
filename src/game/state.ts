@@ -1,8 +1,8 @@
-import { CLASSES, CLASS_KEYS, EQUIP, MONSTERS, BUILDINGS, villageMods, equipByKey, type NodeKind } from './data';
+import { CLASSES, CLASS_KEYS, EQUIP, MONSTERS, BUILDINGS, finished, villageDef, villageMods, equipByKey, type NodeKind } from './data';
 import { HOUSE_CAP, DAY, NIGHT_START, MORNING } from './constants';
 import { forgeMult, lvMult } from './level';
 import { pick, randi, weighted } from './util';
-import { baseRoads, inVillage, isRoad, randomZoneTile, syncBounds, syncRoads, villageDist, VB } from './world';
+import { baseRoads, inVillage, isRoad, makeTerrain, randomZoneTile, syncBounds, syncRoads, terrainAt, trimRoads, villageDist, VB } from './world';
 import { makeLook, randomJob } from './looks';
 import { comboAppeal } from './combos';
 import { titleBonus } from './social';
@@ -151,7 +151,7 @@ export function assignHousing(s: GameState) {
 }
 
 export function attraction(s: GameState): number {
-  return s.buildings.reduce((a, b) => a + BUILDINGS[b.type].attraction * lvMult(b.level), 0) + comboAppeal(s);
+  return s.buildings.reduce((a, b) => a + (finished(b) ? BUILDINGS[b.type].attraction * lvMult(b.level) : 0), 0) + comboAppeal(s);
 }
 
 export function addItem(s: GameState, item: string, n: number) {
@@ -170,8 +170,8 @@ export function spawnNode(s: GameState, kind?: NodeKind, near = false) {
 
 export function newGame(village: string): GameState {
   const s: GameState = {
-    v: 3, village, vlv: 0, roads: [], time: DAY * 0.05, day: 0, money: 4000,
-    items: { wood: 40, stone: 30, fruit: 30, meat: 0 },
+    v: 3, village, vlv: 0, roads: [], time: DAY * 0.05, day: 0, money: villageDef(village).start.money,
+    items: { wood: villageDef(village).start.wood, stone: villageDef(village).start.stone, fruit: villageDef(village).start.fruit, meat: villageDef(village).start.meat ?? 0 },
     buildings: [], nodes: [], monsters: [], npcs: [], profiles: [], quests: [], exp: null,
     mlv: {}, wlv: {}, disc: ['wood', 'stone', 'fruit'], seen: [], nextId: 1, log: [], scored: false, score: null,
     timers: { spawn: 0, node: 0, rescue: 0 },
@@ -179,12 +179,14 @@ export function newGame(village: string): GameState {
     comboSeen: [], weather: 'clear', effects: [], bonds: {}, couples: [], reports: [], ys: emptyYear(), shinySeen: [],
     merchant: null, nextBoss: 40, fx: [],
     fame: 0, commissions: [], cseason: -1, rivals: [], nextVip: 45, vips: [], notes: [],
-    research: {}, researching: null, rqueue: [], auto: { research: false, forge: false, upgrade: false }, depth: {}, pets: [], cat: null, hist: [], histBase: { e: 0, t: 0, k: 0 },
+    research: {}, researching: null, rqueue: [], auto: { research: false, forge: false, upgrade: false, build: false }, depth: {}, pets: [], cat: null, hist: [], histBase: { e: 0, t: 0, k: 0 },
   };
   const m = villageMods(village);
   for (const [k, d] of Object.entries(MONSTERS)) s.mlv[k] = { level: d.base + m.monsterLevel, exp: 0 };
+  s.terrain = makeTerrain(village);
   syncBounds(s);
   s.roads = baseRoads();
+  trimRoads(s, { x: 30, y: 30 });
   syncRoads(s);
   s.buildings.push({ id: newId(s), type: 'guild', x: 30, y: 30, rot: 0, level: 1, exp: 0 });
   s.buildings.push({ id: newId(s), type: 'house', x: 30, y: 33, rot: 0, level: 1, exp: 0 });
@@ -192,7 +194,7 @@ export function newGame(village: string): GameState {
   for (let i = 0; i < 55; i++) spawnNode(s, undefined, i < 30);
   for (let i = 0; i < 8; i++) {
     const x = VB.min + randi(0, VB.max - VB.min), y = VB.min + randi(0, VB.max - VB.min);
-    if (inVillage(x, y) && villageDist(x, y) === 0 && (x < 27 || x > 36 || y < 27 || y > 36) && !isRoad(x, y))
+    if (inVillage(x, y) && villageDist(x, y) === 0 && (x < 27 || x > 36 || y < 27 || y > 36) && !isRoad(x, y) && !terrainAt(x, y))
       s.nodes.push({ id: newId(s), kind: 'tree', x, y, amount: randi(6, 10), v: randi(0, 3) });
   }
   const g = guild(s);

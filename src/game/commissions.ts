@@ -1,5 +1,5 @@
 import { DAYS_PER_MONTH } from './constants';
-import { BUILDINGS, EQUIP, ITEMS, MONSTERS, BASE_ITEMS, shopTier, type Slot } from './data';
+import { BUILDINGS, EQUIP, ITEMS, MONSTERS, BASE_ITEMS, shopTier, type Slot, bldAvailable, villageDef } from './data';
 import { buildCost } from './econ';
 import { addFame } from './fame';
 import { addItem, log, newId, note, ofKind, residents, year } from './state';
@@ -60,7 +60,7 @@ const GENS: [string, number, Gen][] = [
     const budget = Math.max(3000, s.money * 1.5 + s.stats.lastIncome * 2);
     const list = Object.keys(BUILDINGS).filter((k) => {
       const d = BUILDINGS[k];
-      return d.buildable !== false && !s.buildings.some((b) => b.type === k) && buildCost(s, k).money <= budget;
+      return d.buildable !== false && bldAvailable(s, k) && !s.buildings.some((b) => b.type === k) && buildCost(s, k).money <= budget;
     });
     return list.length ? { k: 'build', target: pick(list), need: 1, diff: 1 } : null;
   }],
@@ -103,7 +103,9 @@ function post(s: GameState) {
   const used = new Set<string>();
   const list: Commission[] = [];
   for (let tries = 0; list.length < PER_SEASON && tries < 30; tries++) {
-    const g = weighted(GENS.filter(([k]) => !used.has(k)), (x) => x[1]);
+    // each village leans toward its own kind of request
+    const theme = villageDef(s.village).theme;
+    const g = weighted(GENS.filter(([k]) => !used.has(k)), (x) => x[1] * (x[0] === theme ? 3 : 1));
     if (!g) break;
     used.add(g[0]);
     const d = g[2](s);

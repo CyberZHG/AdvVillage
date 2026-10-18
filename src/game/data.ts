@@ -1,5 +1,5 @@
 export type Slot = 'weapon' | 'armor' | 'accessory';
-export type BKind = 'guild' | 'house' | 'food' | 'shop' | 'souvenir' | 'forge' | 'clinic' | 'fun' | 'inn' | 'decor';
+export type BKind = 'guild' | 'house' | 'food' | 'shop' | 'souvenir' | 'forge' | 'clinic' | 'fun' | 'inn' | 'decor' | 'work';
 export type NodeKind = 'tree' | 'rock' | 'bush';
 
 export interface Cost { money: number; wood?: number; stone?: number }
@@ -86,17 +86,33 @@ export const equipByKey = (key: string | null): EquipDef | undefined => {
   return ALL_EQUIP.find((e) => e.key === key);
 };
 
-export type Category = 'housing' | 'food' | 'shops' | 'leisure' | 'services' | 'decor';
-export const CATEGORIES: Category[] = ['housing', 'food', 'shops', 'leisure', 'services', 'decor'];
+export type Category = 'housing' | 'food' | 'shops' | 'leisure' | 'services' | 'decor' | 'land' | 'wonder';
+export const CATEGORIES: Category[] = ['housing', 'food', 'shops', 'leisure', 'services', 'decor', 'land', 'wonder'];
 
 export interface BuildingDef {
-  size: 1 | 2; cost: Cost; attraction: number; price: number; kind: BKind; cat: Category;
+  size: 1 | 2 | 3; cost: Cost; attraction: number; price: number; kind: BKind; cat: Category;
   slot?: Slot; unique?: boolean; buildable?: boolean;
   // specialty goods: a sale uses one of these from storage, in order, and adds twice its value to the price
   goods?: string[];
   // [from, to] time of day when the place is busiest; outside it visitors rarely come
   peak?: [number, number]; closed?: [number, number];
+  // must stand next to this terrain, and is only offered on maps that have it
+  near?: 'water' | 'rock' | 'bog' | 'thicket' | 'vent' | 'cave';
+  // items brought in each day at level 1: [item, amount]; fractions are a daily chance
+  yield?: [string, number][];
+  // regional flavour: only offered while the game is played in this language
+  lang?: string;
+  // only offered in this village
+  village?: string;
+  // a wonder: raised in stages, each needing one of these rare materials in turn
+  wonder?: string[];
+  // may stand on bog (stilts)
+  onBog?: boolean;
 }
+
+// the language the player chose, which brings its own trees, festival decorations and a few buildings
+export const culture = { lang: 'en' };
+export const setCulture = (l: string) => { culture.lang = l; };
 
 export const BUILDINGS: Record<string, BuildingDef> = {
   guild: { size: 2, cost: { money: 0 }, attraction: 3, price: 0, kind: 'guild', cat: 'services', unique: true, buildable: false },
@@ -130,6 +146,58 @@ export const BUILDINGS: Record<string, BuildingDef> = {
   gazebo: { size: 2, cost: { money: 3500, wood: 60, stone: 20 }, attraction: 10, price: 0, kind: 'decor', cat: 'decor' },
   windmill: { size: 2, cost: { money: 4500, wood: 90, stone: 30 }, attraction: 9, price: 0, kind: 'decor', cat: 'decor' },
   clockTower: { size: 2, cost: { money: 12000, stone: 220 }, attraction: 18, price: 0, kind: 'decor', cat: 'decor' },
+  fishingDock: { size: 1, cost: { money: 1400, wood: 30 }, attraction: 4, price: 16, kind: 'food', cat: 'land', near: 'water', peak: [0.3, 0.7], yield: [['meat', 3], ['shell', 0.3], ['pearl', 0.08]] },
+  waterMill: { size: 2, cost: { money: 3800, wood: 80, stone: 20 }, attraction: 8, price: 0, kind: 'decor', cat: 'land', near: 'water', yield: [['fruit', 6]] },
+  quarry: { size: 2, cost: { money: 2400, wood: 40 }, attraction: 1, price: 0, kind: 'work', cat: 'land', near: 'rock', yield: [['stone', 8], ['silverOre', 0.3], ['goldOre', 0.1]] },
+  lookout: { size: 1, cost: { money: 2200, wood: 40, stone: 20 }, attraction: 7, price: 10, kind: 'fun', cat: 'land', near: 'rock', peak: [0.2, 0.75] },
+  mudBath: { size: 2, cost: { money: 3200, wood: 40, stone: 20 }, attraction: 9, price: 22, kind: 'fun', cat: 'land', near: 'bog', peak: [0.4, 0.85], goods: ['herb', 'spore'] },
+  herbGarden: { size: 1, cost: { money: 1300, wood: 20 }, attraction: 2, price: 0, kind: 'work', cat: 'land', near: 'bog', yield: [['herb', 2], ['spore', 0.5]] },
+  lumberCamp: { size: 2, cost: { money: 1800, wood: 10, stone: 10 }, attraction: 1, price: 0, kind: 'work', cat: 'land', near: 'thicket', yield: [['wood', 10], ['hardwood', 0.4]] },
+  paifang: { size: 1, cost: { money: 2600, wood: 30, stone: 40 }, attraction: 8, price: 0, kind: 'decor', cat: 'decor', lang: 'zh' },
+  operaStage: { size: 2, cost: { money: 6500, wood: 110, stone: 30 }, attraction: 13, price: 28, kind: 'fun', cat: 'leisure', lang: 'zh', peak: [0.5, 0.85], goods: ['silk', 'feather'] },
+  onsen: { size: 2, cost: { money: 7000, wood: 50, stone: 110 }, attraction: 14, price: 34, kind: 'fun', cat: 'leisure', lang: 'ja', peak: [0.45, 0.9], goods: ['herb', 'emberCore'] },
+  torii: { size: 1, cost: { money: 1800, wood: 50 }, attraction: 7, price: 0, kind: 'decor', cat: 'decor', lang: 'ja' },
+  stoneLantern: { size: 1, cost: { money: 500, stone: 18 }, attraction: 2, price: 0, kind: 'decor', cat: 'decor', lang: 'ja' },
+  pharmacy: { size: 1, cost: { money: 2000, wood: 20, stone: 10 }, attraction: 2, price: 18, kind: 'clinic', cat: 'services', lang: 'zh', goods: ['herb', 'spore'] },
+  earthShrine: { size: 1, cost: { money: 1200, stone: 30 }, attraction: 5, price: 0, kind: 'decor', cat: 'decor', lang: 'zh' },
+  baoziShop: { size: 1, cost: { money: 900, wood: 15 }, attraction: 2, price: 9, kind: 'food', cat: 'food', lang: 'zh', peak: [0, 0.45], goods: ['meat', 'egg'] },
+  tanghuluStall: { size: 1, cost: { money: 600, wood: 10 }, attraction: 3, price: 7, kind: 'food', cat: 'food', lang: 'zh', peak: [0.2, 0.7], goods: ['honey', 'fruit'] },
+  shrine: { size: 2, cost: { money: 5000, wood: 80, stone: 60 }, attraction: 12, price: 0, kind: 'decor', cat: 'decor', lang: 'ja' },
+  teaRoom: { size: 1, cost: { money: 2100, wood: 30 }, attraction: 5, price: 16, kind: 'fun', cat: 'leisure', lang: 'ja', peak: [0.3, 0.7], goods: ['herb'] },
+  pagoda: { size: 2, cost: { money: 10000, wood: 160, stone: 60 }, attraction: 16, price: 0, kind: 'decor', cat: 'decor', lang: 'ja' },
+  koiPond: { size: 1, cost: { money: 1100, stone: 20 }, attraction: 5, price: 0, kind: 'decor', cat: 'decor', lang: 'ja' },
+  takoyakiStall: { size: 1, cost: { money: 700, wood: 10 }, attraction: 3, price: 9, kind: 'food', cat: 'food', lang: 'ja', peak: [0.4, 0.95], goods: ['meat'] },
+  dangoStall: { size: 1, cost: { money: 600, wood: 10 }, attraction: 3, price: 7, kind: 'food', cat: 'food', lang: 'ja', peak: [0.2, 0.7], goods: ['honey'] },
+  jangseung: { size: 1, cost: { money: 900, wood: 30 }, attraction: 4, price: 0, kind: 'decor', cat: 'decor', lang: 'ko' },
+  mineShaft: { size: 2, cost: { money: 3200, wood: 60, stone: 20 }, attraction: 1, price: 0, kind: 'work', cat: 'land', near: 'cave', yield: [['iron', 3], ['silverOre', 0.8], ['goldOre', 0.3], ['crystal', 0.15]] },
+  riverPort: { size: 2, cost: { money: 3000, wood: 70, stone: 20 }, attraction: 6, price: 26, kind: 'souvenir', cat: 'land', near: 'water', village: 'maple', goods: ['pearl', 'shell', 'amber'] },
+  stiltHouse: { size: 1, cost: { money: 600, wood: 20 }, attraction: 1, price: 0, kind: 'house', cat: 'housing', near: 'bog', village: 'mist', onBog: true },
+  snowLodge: { size: 2, cost: { money: 3200, wood: 70, stone: 30 }, attraction: 6, price: 38, kind: 'inn', cat: 'housing', village: 'frost', goods: ['pelt', 'frostShard'] },
+  caravanserai: { size: 2, cost: { money: 4200, wood: 30, stone: 70 }, attraction: 7, price: 40, kind: 'inn', cat: 'land', near: 'water', village: 'sun', goods: ['silk', 'amber'] },
+  cathedral: { size: 3, cost: { money: 20000, wood: 300, stone: 600 }, attraction: 45, price: 0, kind: 'decor', cat: 'wonder', unique: true, wonder: ['soulGem', 'moonstone', 'crystal'] },
+  colossus: { size: 3, cost: { money: 20000, wood: 100, stone: 800 }, attraction: 45, price: 0, kind: 'decor', cat: 'wonder', unique: true, wonder: ['goldOre', 'mithril', 'emberCore'] },
+  observatory: { size: 3, cost: { money: 22000, wood: 200, stone: 500 }, attraction: 42, price: 0, kind: 'decor', cat: 'wonder', unique: true, wonder: ['starDust', 'crystal', 'mithril'] },
+  palace: { size: 3, cost: { money: 25000, wood: 500, stone: 500 }, attraction: 55, price: 0, kind: 'decor', cat: 'wonder', unique: true, lang: 'zh', wonder: ['gem', 'goldOre', 'silk'] },
+  craneTower: { size: 3, cost: { money: 22000, wood: 600, stone: 300 }, attraction: 50, price: 0, kind: 'decor', cat: 'wonder', unique: true, lang: 'zh', wonder: ['feather', 'amber', 'gem'] },
+  castle: { size: 3, cost: { money: 25000, wood: 400, stone: 700 }, attraction: 55, price: 0, kind: 'decor', cat: 'wonder', unique: true, lang: 'ja', wonder: ['mithril', 'dragonFang', 'iron'] },
+  goldenPavilion: { size: 3, cost: { money: 22000, wood: 400, stone: 300 }, attraction: 50, price: 0, kind: 'decor', cat: 'wonder', unique: true, lang: 'ja', wonder: ['goldOre', 'pearl', 'moonstone'] },
+  hunterLodge: { size: 1, cost: { money: 1500, wood: 25 }, attraction: 2, price: 0, kind: 'work', cat: 'land', near: 'thicket', yield: [['meat', 3], ['pelt', 0.3], ['feather', 0.3]] },
+};
+export const WONDER_STAGES = 5;
+// an unfinished wonder is a building site and does nothing yet; older buildings carry no stage and count as done
+export const finished = (b: { type: string; stage?: number }) => !BUILDINGS[b.type].wonder || (b.stage ?? WONDER_STAGES) >= WONDER_STAGES;
+// cost of raising a wonder to stage k (1..WONDER_STAGES); stage 0, the footing, costs the listed price
+export function wonderCost(type: string, k: number): Cost & { mat: string; count: number } {
+  const d = BUILDINGS[type], f = 1 + 0.5 * k;
+  return { money: Math.round(d.cost.money * f), wood: Math.round((d.cost.wood ?? 0) * f), stone: Math.round((d.cost.stone ?? 0) * f), mat: d.wonder![(k - 1) % d.wonder!.length], count: 8 + 5 * k };
+}
+
+// terrain buildings only appear where the map has their terrain
+export const bldAvailable = (s: { village: string; terrain?: { water: number[]; rock: number[]; bog: number[]; thicket: number[]; vent?: number[]; cave?: number[] } }, type: string) => {
+  const d = BUILDINGS[type];
+  if (d.lang && d.lang !== culture.lang) return false;
+  if (d.village && d.village !== s.village) return false;
+  return !d.near || (s.terrain?.[d.near]?.length ?? 0) > 0;
 };
 // decorations also lift the takings of businesses that stand near them
 export const DECOR_RADIUS = 3;
@@ -162,14 +230,32 @@ export interface VillageMods {
   hunger: number; drops: number; touristRate: number; touristSpend: number; forgeCost: number;
 }
 export type Ground = 'meadow' | 'rocky' | 'marsh' | 'snow' | 'sand';
-export interface VillageDef { key: string; ground: Ground; mods: Partial<VillageMods> }
+// terrain features, all generated from these numbers so a village always looks the same.
+// river: runs the map's length along an axis ('at' is its mean position across, 'w' its width)
+// lake: a pond too wide to bridge; ridge: a broken line of rock from a to b; rocks/bog/thicket: patches [x, y, radius]
+export interface TerrainDef {
+  river?: { along: 'x' | 'y'; at: number; amp: number; w: number; seed: number };
+  lakes?: [number, number, number, number][];
+  ridges?: [number, number, number, number][];
+  rocks?: [number, number, number][];
+  bog?: [number, number, number][];
+  thicket?: [number, number, number][];
+  // single-tile features: steaming hot-spring vents and cave mouths; flower meadows are patches [x, y, radius]
+  vents?: [number, number][];
+  caves?: [number, number][];
+  flowers?: [number, number, number][];
+}
+// start: opening stock; theme: the commission kind this village posts more often
+export interface VillageDef { key: string; ground: Ground; mods: Partial<VillageMods>; terrain: TerrainDef; road: number; start: { money: number; wood: number; stone: number; fruit: number; meat?: number }; theme: string }
+// street paving inside the village; index 0 is the original cobbles
+export const ROAD_STYLES = ['cobble', 'brick', 'flagstone', 'gravel', 'plank', 'sandstone'] as const;
 
 export const VILLAGES: VillageDef[] = [
-  { key: 'maple', ground: 'meadow', mods: {} },
-  { key: 'iron', ground: 'rocky', mods: { wood: 0.6, stone: 2, monsterLevel: 5, forgeCost: 0.7 } },
-  { key: 'mist', ground: 'marsh', mods: { fruit: 2, monsterRate: 1.5, touristRate: 0.7 } },
-  { key: 'frost', ground: 'snow', mods: { hunger: 1.5, drops: 1.5, monsterLevel: 10, touristRate: 0.8 } },
-  { key: 'sun', ground: 'sand', mods: { wood: 0.3, fruit: 0.5, touristSpend: 1.5, touristRate: 1.3 } },
+  { key: 'maple', ground: 'meadow', mods: {}, terrain: { river: { along: 'y', at: 26.5, amp: 1.6, w: 2, seed: 1 }, thicket: [[37, 25, 2.2], [43, 41, 3], [14, 16, 4], [50, 12, 3.5], [12, 46, 3]], flowers: [[40, 47, 3], [17, 40, 3.5], [47, 15, 3]] }, road: 0, start: { money: 4000, wood: 40, stone: 30, fruit: 30 }, theme: 'build' },
+  { key: 'iron', ground: 'rocky', mods: { wood: 0.6, stone: 2, monsterLevel: 5, forgeCost: 0.7 }, terrain: { ridges: [[6, 20, 26, 14], [38, 14, 58, 22], [44, 46, 60, 40], [6, 44, 20, 52]], rocks: [[26, 37, 1.3], [37, 26, 1.2], [35, 38, 0.9], [18, 30, 1.6], [47, 31, 1.8]], thicket: [[24, 24, 1.6]], vents: [[20, 47], [21, 47], [47, 20]], caves: [[16, 17], [48, 18], [51, 43]], flowers: [[29, 45, 2]] }, road: 2, start: { money: 3500, wood: 20, stone: 120, fruit: 20 }, theme: 'forge' },
+  { key: 'mist', ground: 'marsh', mods: { fruit: 2, monsterRate: 1.5, touristRate: 0.7 }, terrain: { river: { along: 'x', at: 38, amp: 2, w: 3, seed: 2 }, bog: [[25, 26, 2.4], [37, 25, 2], [18, 22, 4], [48, 18, 4], [20, 50, 3.5], [50, 50, 3]], thicket: [[12, 32, 3]], flowers: [[44, 31, 2.5], [14, 40, 3]] }, road: 4, start: { money: 4000, wood: 60, stone: 20, fruit: 80 }, theme: 'fam' },
+  { key: 'frost', ground: 'snow', mods: { hunger: 1.5, drops: 1.5, monsterLevel: 10, touristRate: 0.8 }, terrain: { lakes: [[40.5, 25.5, 3.6, 2.8], [16, 44, 5, 4]], rocks: [[25, 37, 1.4], [44, 38, 1.6], [20, 22, 2]], ridges: [[48, 50, 60, 44]], thicket: [[36, 44, 2]], vents: [[22, 27], [41, 47], [42, 47]] }, road: 3, start: { money: 5000, wood: 60, stone: 40, fruit: 20, meat: 30 }, theme: 'deliver' },
+  { key: 'sun', ground: 'sand', mods: { wood: 0.3, fruit: 0.5, touristSpend: 1.5, touristRate: 1.3 }, terrain: { lakes: [[25, 26, 2.6, 2.2]], rocks: [[38, 38, 2], [44, 22, 2.4], [16, 40, 3], [50, 48, 2.6]], ridges: [[10, 12, 28, 8]] }, road: 5, start: { money: 6000, wood: 10, stone: 40, fruit: 10 }, theme: 'earn' },
 ];
 const DEFAULT_MODS: VillageMods = {
   wood: 1, stone: 1, fruit: 1, monsterRate: 1, monsterLevel: 0,

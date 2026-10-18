@@ -1,4 +1,4 @@
-import { BUILDINGS, DECOR_MAX, DECOR_RADIUS, DECOR_STEP } from './data';
+import { BUILDINGS, DECOR_MAX, DECOR_RADIUS, DECOR_STEP, finished } from './data';
 import type { Building, GameState } from './types';
 
 export interface ComboDef { key: string; members: string[]; income: number; appeal: number }
@@ -42,13 +42,13 @@ const decorOf = new Map<number, number>();
 
 // a building can belong to several combos but only to one instance of each
 export function activeCombos(s: GameState): ActiveCombo[] {
-  const key = s.buildings.map((b) => b.id).join(',');
+  const key = s.buildings.map((b) => b.id + (b.stage != null ? ':' + b.stage : '')).join(',');
   if (key === cacheKey) return cache;
   cacheKey = key;
   cache = [];
   memberOf.clear();
   decorOf.clear();
-  const decor = s.buildings.filter((b) => BUILDINGS[b.type].kind === 'decor');
+  const decor = s.buildings.filter((b) => BUILDINGS[b.type].kind === 'decor' && finished(b));
   for (const b of s.buildings) {
     if (!BUILDINGS[b.type].price) continue;
     const p = center(b);

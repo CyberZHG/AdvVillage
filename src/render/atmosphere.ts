@@ -1,5 +1,5 @@
 import type { GameState } from '../game/types';
-import { BUILDINGS, villageDef } from '../game/data';
+import { BUILDINGS, culture, villageDef } from '../game/data';
 import { festival, hasEffect, season } from '../game/events';
 
 // deterministic 0..1 noise so particles need no per-frame state
@@ -13,7 +13,7 @@ export function nightAlpha(t: number): number {
   return 0;
 }
 
-const TINT = ['rgba(255,190,220,0.05)', '', 'rgba(230,130,40,0.09)', 'rgba(235,245,255,0.16)'];
+const TINT = ['rgba(255,190,220,0.04)', '', 'rgba(230,150,60,0.05)', 'rgba(235,245,255,0.16)'];
 
 function fall(w: number, hgt: number, time: number, n: number, vx: number, vy: number, draw: (x: number, y: number, i: number) => void) {
   for (let i = 0; i < n; i++) {
@@ -24,7 +24,7 @@ function fall(w: number, hgt: number, time: number, n: number, vx: number, vy: n
 }
 
 export function drawAtmosphere(ctx: CanvasRenderingContext2D, s: GameState, w: number, hgt: number, time: number, tod: number,
-  sx: (x: number, y: number) => number, sy: (x: number, y: number) => number) {
+  sx: (x: number, y: number) => number, sy: (x: number, y: number) => number, weather = s.weather, fade = 1) {
   const se = season(s);
   const snowGround = villageDef(s.village).ground === 'snow';
   const tint = TINT[se];
@@ -33,20 +33,7 @@ export function drawAtmosphere(ctx: CanvasRenderingContext2D, s: GameState, w: n
   const fest = festival(s);
   const dark = tod >= 0.72 || tod < 0.04;
 
-  if (s.weather === 'rain' || s.weather === 'storm') {
-    ctx.fillStyle = s.weather === 'storm' ? 'rgba(30,40,70,0.18)' : 'rgba(40,60,90,0.1)';
-    ctx.fillRect(0, 0, w, hgt);
-    ctx.fillStyle = 'rgba(190,215,255,0.55)';
-    fall(w, hgt, time, area * (s.weather === 'storm' ? 3 : 2), -30, 220, (x, y) => { ctx.fillRect(x, y, 1, 3); });
-    if (s.weather === 'storm' && h(Math.floor(time * 2)) > 0.97) { ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fillRect(0, 0, w, hgt); }
-  } else if (s.weather === 'snow') {
-    ctx.fillStyle = 'rgba(255,255,255,0.85)';
-    fall(w, hgt, time, area * 1.5, 8, 18, (x, y, i) => ctx.fillRect(x + Math.round(Math.sin(time + i) * 2), y, i % 3 ? 1 : 2, i % 3 ? 1 : 2));
-  } else if (se === 0) {
-    fall(w, hgt, time, area * (fest ? 0.9 : 0.35), 14, 10, (x, y, i) => { ctx.fillStyle = i % 2 ? '#ffc8dc' : '#ffe2ee'; ctx.fillRect(x, y, 2, 1); });
-  } else if (se === 2) {
-    fall(w, hgt, time, area * 0.35, 10, 12, (x, y, i) => { ctx.fillStyle = ['#e8902a', '#d8602a', '#e8c040'][i % 3]; ctx.fillRect(x, y, 2, 2); });
-  }
+  drawWeather(ctx, s, weather, w, hgt, time, fade);
 
   if (fest === 'harvest') fall(w, hgt, time, area * 0.8, 6, 20, (x, y, i) => { ctx.fillStyle = ['#ff6a6a', '#ffd34a', '#7dff8a', '#7dd6ff'][i % 4]; ctx.fillRect(x, y, 1, 2); });
   if (fest === 'lantern' && dark) {
@@ -60,7 +47,8 @@ export function drawAtmosphere(ctx: CanvasRenderingContext2D, s: GameState, w: n
       ctx.fillRect(px - 1, py - 1, 3, 3);
     }
   }
-  if (fest === 'fireworks' && dark) {
+  // the Dragon Boat Festival has boats on the water instead of fireworks
+  if (fest === 'fireworks' && dark && culture.lang !== 'zh') {
     for (let k = 0; k < 3; k++) {
       const cycle = Math.floor(time / 2.2 + k * 0.37);
       const t = (time / 2.2 + k * 0.37) % 1;
@@ -90,6 +78,7 @@ const EMOTE: Record<string, [string, string[]]> = {
   note: ['#4aa8ff', ['..##.', '..#.#', '..#..', '###..', '##...']],
   hurt: ['#4a8aff', ['..#..', '.###.', '#####', '#####', '.###.']],
   win: ['#ff6a3a', ['..#..', '..#..', '..#..', '.....', '..#..']],
+  wave: ['#e8a070', ['#.#.#', '#.#.#', '#####', '.####', '..##.']],
 };
 
 export function drawEmote(ctx: CanvasRenderingContext2D, kind: string, px: number, py: number) {
@@ -103,4 +92,49 @@ export function drawEmote(ctx: CanvasRenderingContext2D, kind: string, px: numbe
   ctx.fillRect(px, py - 2, 1, 1);
   ctx.fillStyle = e[0];
   e[1].forEach((row, y) => { for (let x = 0; x < 5; x++) if (row[x] === '#') ctx.fillRect(px - 2 + x, py - 8 + y, 1, 1); });
+}
+
+// rain, snow and the falling petals or leaves of fair weather; 'fade' lets two kinds of weather cross over
+export function drawWeather(ctx: CanvasRenderingContext2D, s: GameState, weather: string, w: number, hgt: number, time: number, fade: number) {
+  if (fade <= 0) return;
+  const se = season(s), fest = festival(s), area = (w * hgt) / 4000;
+  ctx.save();
+  ctx.globalAlpha = fade;
+  if (weather === 'rain' || weather === 'storm') {
+    ctx.fillStyle = weather === 'storm' ? 'rgba(30,40,70,0.18)' : 'rgba(40,60,90,0.1)';
+    ctx.fillRect(0, 0, w, hgt);
+    ctx.fillStyle = 'rgba(190,215,255,0.55)';
+    fall(w, hgt, time, area * (weather === 'storm' ? 3 : 2), -30, 220, (x, y) => { ctx.fillRect(x, y, 1, 3); });
+  } else if (weather === 'snow') {
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    fall(w, hgt, time, area * 1.5, 8, 18, (x, y, i) => ctx.fillRect(x + Math.round(Math.sin(time + i) * 2), y, i % 3 ? 1 : 2, i % 3 ? 1 : 2));
+  } else if (se === 0) {
+    fall(w, hgt, time, area * (fest ? 0.9 : 0.35), 14, 10, (x, y, i) => { ctx.fillStyle = i % 2 ? '#ffc8dc' : '#ffe2ee'; ctx.fillRect(x, y, 2, 1); });
+  } else if (se === 2) {
+    fall(w, hgt, time, area * 0.35, 10, 12, (x, y, i) => { ctx.fillStyle = ['#e8902a', '#d8602a', '#e8c040'][i % 3]; ctx.fillRect(x, y, 2, 2); });
+  }
+
+  if (weather === 'fog') {
+    ctx.fillStyle = 'rgba(225,230,235,0.28)'; ctx.fillRect(0, 0, w, hgt);
+    for (let k = 0; k < 6; k++) {
+      const y = Math.round(((h(k) * hgt + time * 3) % (hgt + 40)) - 20), x = Math.round(((time * (6 + k) + h(k + 3) * w) % (w + 200)) - 200);
+      ctx.fillStyle = 'rgba(240,244,248,0.22)'; ctx.fillRect(x, y, 200, 10 + (k % 3) * 6);
+    }
+  }
+  // a forked bolt now and then in a storm: one every ten seconds or so, with only a faint flash
+  if (weather === 'storm') {
+    const cyc = Math.floor(time / 6), t = (time / 6) % 1;
+    if (h(cyc) > 0.4 && t < 0.025) {
+      let x = Math.round(h(cyc + 1) * w), y = 0;
+      ctx.fillStyle = '#fffbe0';
+      while (y < hgt * 0.6) { ctx.fillRect(x, y, 1, 3); y += 3; x += Math.round((h(y + cyc) - 0.5) * 4); }
+      ctx.fillStyle = 'rgba(255,255,255,0.07)'; ctx.fillRect(0, 0, w, hgt);
+    }
+  }
+  if (weather === 'sandstorm') {
+    ctx.fillStyle = 'rgba(214,176,108,0.32)'; ctx.fillRect(0, 0, w, hgt);
+    ctx.fillStyle = 'rgba(240,214,160,0.7)';
+    fall(w, hgt, time, area * 2, 260, 30, (x, y, i) => ctx.fillRect(x, y, 3 + (i % 3) * 2, 1));
+  }
+  ctx.restore();
 }

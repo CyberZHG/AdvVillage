@@ -2,15 +2,15 @@ import { EXP_H, EXP_W } from '../render/expbar';
 import { t, fmt, npcName, param, LANGS, getLang } from '../i18n';
 import {
   BUILDINGS, CATEGORIES, CLASS_KEYS, DECOR_MAX, DECOR_RADIUS, DECOR_STEP, EQUIP, EXPEDITIONS, ITEMS, MONSTERS, mapZone, ROAD_COST,
-  SHOP_TIER_LEVELS, VILLAGES, shopTier, equipByKey, type Category, type Cost, type Slot,
+  SHOP_TIER_LEVELS, VILLAGES, WONDER_STAGES, bldAvailable, finished, wonderCost, ROAD_STYLES, villageDef, shopTier, equipByKey, type Category, type Cost, type Slot,
 } from '../game/data';
-import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, HOUSE_CAP, SCORE_YEAR } from '../game/constants';
+import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, EXPANSIONS, HOUSE_CAP, SCORE_YEAR } from '../game/constants';
 import { bldExpNeed, expNeed, famExpNeed, forgeMult, lvMult } from '../game/level';
 import {
   attraction, bld, debuffs, fighterStats, housed, maxHp, monsterStats, npcById, residents, tod, year,
 } from '../game/state';
 import {
-  buildCost, canBuild, computeScore, expansionCost, forgeCost, forgeable, goodsItem, goodsPrice, hasCost, upgradeCost,
+  buildCost, canAdvance, canBuild, computeScore, expansionCost, forgeCost, forgeable, goodsItem, goodsPrice, hasCost, upgradeCost,
 } from '../game/econ';
 import { commissionText, progress, seasonEnds } from '../game/commissions';
 import { FAME_RANKS, VIPS, fameRank } from '../game/fame';
@@ -18,7 +18,7 @@ import { ACHIEVEMENTS } from '../game/achievements';
 import { COMBOS, COMBO_RADIUS, activeCombos, combosOf, decorBonus } from '../game/combos';
 import { SEASONS, currentBoss, festival, season } from '../game/events';
 import { titleBonus } from '../game/social';
-import { buildingIcon, catIcon, humanIcon, itemIcon, monsterIcon } from '../render/art';
+import { buildingIcon, catIcon, humanIcon, itemIcon, monsterIcon, tileIcon, uiIcon } from '../render/art';
 import { CLASS_COLOR, type Sel } from '../render/renderer';
 import { QUEUE_MAX, RESEARCH, canQueue, canResearch, researchCost, rlv } from '../game/research';
 import { AUTO_KEYS, autoReserve } from '../game/auto';
@@ -73,9 +73,15 @@ function statusKey(n: Npc): string {
 }
 
 export const nameOf = (n: Npc) => (n.title ? t('ui.titled', { n: npcName(n.name), t: `@title.${n.title}` }) : npcName(n.name));
-const SEASON_ICON = ['🌸', '☀️', '🍂', '❄️'];
-const WEATHER_ICON: Record<string, string> = { clear: '', rain: '☔', snow: '🌨', storm: '⛈' };
+const SEASON_ICON = ['spring', 'summer', 'autumn', 'winter'];
+const WEATHER_ICON: Record<string, string> = { rain: 'rain', snow: 'snow', storm: 'storm', fog: 'fog', sandstorm: 'fog' };
+const ui = (name: string) => img(uiIcon(name));
 const roleLabel = (n: Npc) => (n.role === 'fighter' ? t((n.promoted ? 'cls2.' : 'cls.') + n.cls) : n.job ? t('job.' + n.job) : t('role.' + n.role));
+
+const yieldTags = (k: string) => {
+  const y = BUILDINGS[k].yield;
+  return y ? `<div>${t('ui.yields')}: ${y.map(([it, n]) => `<span class="tag">${img(itemIcon(it))}${t('item.' + it)}${n >= 1 ? ' ×' + n : ''}</span>`).join('')}</div>` : '';
+};
 
 // ---------------- skeleton ----------------
 
@@ -111,7 +117,7 @@ export function updateHud(c: Ctl, tab: Tab | null) {
   setHtml('t-date', dateText(s));
   const tt = tod(s);
   const fest = festival(s);
-  setHtml('t-tod', `<span title="${t('season.' + SEASONS[season(s)])}">${SEASON_ICON[season(s)]}</span>${tt >= 0.75 || tt < 0.04 ? '☾' : ''}<span title="${t('weather.' + s.weather)}">${WEATHER_ICON[s.weather] ?? ''}</span>${fest ? `<span class="fest">${t('fest.' + fest)}</span>` : ''}${currentBoss(s) ? `<span class="bossbadge" data-act="tab:guild">${t('ui.bossAlert')}</span>` : ''}`);
+  setHtml('t-tod', `<span title="${t('season.' + SEASONS[season(s)])}">${ui(SEASON_ICON[season(s)])}</span>${tt >= 0.75 || tt < 0.04 ? ui('moon') : ''}<span title="${t('weather.' + s.weather)}">${WEATHER_ICON[s.weather] ? ui(WEATHER_ICON[s.weather]) : ''}</span>${fest ? `<span class="fest">${t('fest.' + fest)}</span>` : ''}${currentBoss(s) ? `<span class="bossbadge" data-act="tab:guild">${t('ui.bossAlert')}</span>` : ''}`);
   const food = (s.items.fruit ?? 0) + (s.items.meat ?? 0);
   const res = residents(s).length;
   const tourists = s.npcs.length - res;
@@ -120,8 +126,8 @@ export function updateHud(c: Ctl, tab: Tab | null) {
     `<span title="${t('item.wood')}">${img(itemIcon('wood'))}${fmt(s.items.wood ?? 0)}</span>`,
     `<span title="${t('item.stone')}">${img(itemIcon('stone'))}${fmt(s.items.stone ?? 0)}</span>`,
     `<span title="${t('ui.food')}">${img(itemIcon('meat'))}${fmt(food)}</span>`,
-    `<span title="${t('ui.population')}">👥${fmt(res)}</span>`,
-    `<span title="${t('ui.tourists')}">🎒${fmt(tourists)}</span>`,
+    `<span title="${t('ui.population')}">${ui('people')}${fmt(res)}</span>`,
+    `<span title="${t('ui.tourists')}">${ui('bag')}${fmt(tourists)}</span>`,
   ].join(''));
   setHtml('t-speed', btn('focus', t('ui.focus'), { cls: c.focus ? 'on' : '' }) + btn('labels', t('ui.labels'), { cls: c.labels ? 'on' : '' }) + [0, 1, 2, 4, 8].map((v) => btn('speed:' + v, v ? '×' + v : '❚❚', { cls: c.speed === v ? 'on' : '' })).join(''));
   setHtml('toolbar', TABS.map((k) => btn('tab:' + k, t('tab.' + k), { cls: tab === k ? 'on' : '' })).join(''));
@@ -138,7 +144,8 @@ export function updateHud(c: Ctl, tab: Tab | null) {
 
   const placing = $('placing');
   placing.classList.toggle('hidden', !c.placing);
-  if (c.placing === 'road' || c.placing === 'unroad') setHtml('placing', `${t(c.placing === 'road' ? 'ui.paintingRoad' : 'ui.removingRoad')} ${c.placing === 'road' ? money(ROAD_COST) : ''} ${btn('cancelPlace', t('ui.done'))}`);
+  if (c.placing === 'clear') setHtml('placing', `${t('ui.clearing')} ${btn('cancelPlace', t('ui.done'))}`);
+  else if (c.placing === 'road' || c.placing === 'unroad') setHtml('placing', `${t(c.placing === 'road' ? 'ui.paintingRoad' : 'ui.removingRoad')} ${c.placing === 'road' ? money(ROAD_COST) : ''} ${btn('cancelPlace', t('ui.done'))}`);
   else if (c.placing) setHtml('placing', `${t('ui.placing', { b: t('b.' + c.placing) })} ${costHtml(s, buildCost(s, c.placing))} ${BUILDINGS[c.placing].kind !== 'decor' ? btn('rotate', t('ui.rotate')) : ''} ${btn('cancelPlace', t('ui.cancel'))}`);
 
   const panel = $('panel');
@@ -158,12 +165,19 @@ export function updateHud(c: Ctl, tab: Tab | null) {
 const PANELS: Record<Tab, (c: Ctl) => string> = {
   build(c) {
     const s = c.s;
-    const cats = `<div class="btns">${CATEGORIES.map((k) => btn('cat:' + k, t('cat.' + k), { cls: buildCat === k ? 'on' : '' })).join('')}</div>`;
+    const shown = (k: string) => BUILDINGS[k].buildable !== false && bldAvailable(s, k);
+    const wonderLocked = (s.vlv ?? 0) < EXPANSIONS.length;
+    const cats = `<div class="btns">${CATEGORIES.filter((c) => Object.keys(BUILDINGS).some((k) => BUILDINGS[k].cat === c && shown(k))).map((k) => btn('cat:' + k, t('cat.' + k), { cls: buildCat === k ? 'on' : '' })).join('')}</div>`;
     const roads = `<div class="card"><div class="card-img">${img(itemIcon('stone'), 'ic big')}</div><div class="card-main"><b>${t('ui.road')}</b>
       <div class="desc">${t('ui.roadDesc')}</div>${money(ROAD_COST, s.money >= ROAD_COST)} <small>${t('ui.perTile')}</small></div>
-      <div class="btns">${btn('place:road', t('ui.paint'))}${btn('place:unroad', t('ui.remove'))}</div></div>`;
+      <div class="btns">${btn('place:road', t('ui.paint'))}${btn('place:unroad', t('ui.remove'))}</div></div>
+      <div class="btns paving">${ROAD_STYLES.map((k, i) => btn('rstyle:' + i, `${img(tileIcon(villageDef(s.village).ground, i), 'tic')}${t('road.' + k)}`, { cls: (paving ?? villageDef(s.village).road) === i ? 'on' : '' })).join('')}</div>
+      <p class="meta">${t('ui.pavingHint')}</p>`;
     const note = buildCat === 'decor' ? `<p class="meta">${t('ui.decorNote', { p: Math.round(DECOR_STEP * 100), r: DECOR_RADIUS, m: Math.round(DECOR_MAX * 100) })}</p>` : '';
-    return cats + note + roads + `<div class="grid">${Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].buildable !== false && BUILDINGS[k].cat === buildCat).map((k) => {
+    const wonderNote = buildCat === 'wonder' ? `<p class="meta">${t(wonderLocked ? 'ui.wonderLocked' : 'ui.wonderNote', { n: WONDER_STAGES })}</p>` : '';
+    const landNote = buildCat === 'land' ? `<p class="meta">${t('ui.landNote')}</p><div class="card"><div class="card-img">${img(itemIcon('wood'), 'ic big')}</div><div class="card-main"><b>${t('ui.clear')}</b>
+      <div class="desc">${t('ui.clearDesc')}</div></div><div class="btns">${btn('place:clear', t('ui.clear'))}</div></div>` : '';
+    return cats + note + wonderNote + landNote + roads + `<div class="grid">${Object.keys(BUILDINGS).filter((k) => shown(k) && BUILDINGS[k].cat === buildCat).map((k) => {
       const d = BUILDINGS[k];
       const built = s.buildings.filter((b) => b.type === k).length;
       const done = !!d.unique && built > 0;
@@ -171,7 +185,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       return `<div class="card ${ok ? '' : 'dim'}">
         <div class="card-img">${img(buildingIcon(k), 'bimg')}</div>
         <div class="card-main"><b>${t('b.' + k)}</b> <small>${t('ui.owned', { n: built })}</small>${hotNow(s, k) ? ` <span class="tag good">${t('ui.hot')}</span>` : ''}
-        <div class="desc">${t('bd.' + k)}</div>${comboTags(s, k)}${goodsTags(s, k)}
+        <div class="desc">${t('bd.' + k)}</div>${comboTags(s, k)}${goodsTags(s, k)}${yieldTags(k)}${d.wonder ? `<div>${t('ui.wonderMats')}: ${d.wonder.map((it) => `<span class="tag">${img(itemIcon(it))}${t('item.' + it)}</span>`).join('')}</div>` : ''}
         <div>${done ? t('ui.uniqueBuilt') : costHtml(s, buildCost(s, k))}</div>
         <div class="meta">${t('ui.size', { n: d.size })} · ${t('ui.attraction')} ${d.attraction}${d.price ? ` · ${t('ui.price')} ${d.price}` : ''}${hoursText(k)}</div></div>
         ${done ? '' : btn('place:' + k, t('ui.build'), { disabled: !ok })}
@@ -270,7 +284,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       const d = MONSTERS[k];
       if (!s.seen.includes(k)) return `<div class="row dim"><span class="mimg q">?</span><span class="grow">${t('ui.unknown')}${d.biomes ? ` <small>${d.biomes.map((g) => t('ground.' + g)).join(' / ')}</small>` : ''}</span></div>`;
       const drops = [...new Set(d.drops.map((x) => x[0]))].map((it) => (s.disc.includes(it) ? img(itemIcon(it)) : '?')).join('');
-      return `<div class="row">${img(monsterIcon(k), 'mimg')}<span class="grow"><b>${t('m.' + k)}</b>${s.shinySeen.includes(k) ? ` <span class="shiny" title="${t('ui.shinySeen')}">✦</span>` : ''} ${t('ui.lv', { lv: s.mlv[k].level })}${d.zone < 0 ? ` <small>${t('ui.rareWild', { z: '@ui.zone' + mapZone(d) })}</small>` : ''}
+      return `<div class="row">${img(monsterIcon(k), 'mimg')}<span class="grow"><b>${t('m.' + k)}</b>${s.shinySeen.includes(k) ? ` <span class="shiny" title="${t('ui.shinySeen')}">${ui('sparkle')}</span>` : ''} ${t('ui.lv', { lv: s.mlv[k].level })}${d.zone < 0 ? ` <small>${t('ui.rareWild', { z: '@ui.zone' + mapZone(d) })}</small>` : ''}
         ${d.biomes ? ` <small>${d.biomes.map((g) => t('ground.' + g)).join(' / ')}</small>` : ''}<br><small>${t('ui.drops')}:</small> ${drops}</span></div>`;
     };
     return `<p class="meta">${t('ui.bestiaryHint')} ${t('ui.found', { n: seen, t: keys.length })}</p>` +
@@ -282,7 +296,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     return `<p class="meta">${t('ui.achHint')} ${t('ui.achCount', { n: done, t: ACHIEVEMENTS.length })}</p>
       <div class="btns">${btn('share', t('ui.share'), { cls: 'primary' })}</div>` + ACHIEVEMENTS.map(([id]) => {
       const at = c.meta.ach[id];
-      return `<div class="row ${at ? '' : 'dim'}"><span class="ach ${at ? 'got' : ''}">${at ? '★' : '☆'}</span><span class="grow"><b>${t(`ach.${id}.name`)}</b>
+      return `<div class="row ${at ? '' : 'dim'}"><span class="ach ${at ? 'got' : ''}">${ui(at ? 'star' : 'starEmpty')}</span><span class="grow"><b>${t(`ach.${id}.name`)}</b>
         <br><small>${t(`ach.${id}.desc`)}</small></span>${at ? `<small>${new Date(at).toLocaleDateString()}</small>` : ''}</div>`;
     }).join('');
   },
@@ -381,8 +395,11 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
   settings(c) {
     const langs = Object.entries(LANGS).map(([k, p]) => btn('lang:' + k, p.label, { cls: getLang() === k ? 'on' : '' })).join('');
     return `<h3>${t('ui.language')}</h3><div class="btns">${langs}</div>
+      <h3>${t('ui.crowd')}</h3><div class="btns">${['all', 'lite', 'min'].map((k) => btn('crowd:' + k, t('crowd.' + k), { cls: (c.meta.crowd ?? 'all') === k ? 'on' : '' })).join('')}</div>
+      <p class="meta">${t('ui.crowdHint')}</p>
       <h3>${t('ui.auto')}</h3><div class="btns">${AUTO_KEYS.map((k) => btn('auto:' + k, t('auto.' + k), { cls: c.s.auto[k] ? 'on' : '' })).join('')}</div>
       <p class="meta">${t('ui.autoHint', { v: fmt(autoReserve(c.s)) })}</p>
+      <p class="meta">${t('ui.autoBuildHint')}</p>
       <h3>${t('ui.data')}</h3><div class="btns">${btn('save', t('ui.saveNow'))}${btn('title', t('ui.backTitle'))}</div>
       <p class="meta">${t('ui.autosave')}</p>
       <h3>${t('ui.backup')}</h3><div class="btns">${btn('export', t('ui.exportFile'))}${btn('exportCopy', t('ui.exportCopy'))}${btn('importOpen', t('ui.import'))}</div>
@@ -419,7 +436,7 @@ function infoCard(c: Ctl): string {
     if (!m) return '';
     const st = monsterStats(s, m.type, m);
     const drops = MONSTERS[m.type].drops.map(([it]) => (s.disc.includes(it) ? `<span class="tag">${img(itemIcon(it))}${t('item.' + it)}</span>` : `<span class="tag">${t('ui.unknown')}</span>`)).join('');
-    const title = (m.boss != null ? t('boss.' + m.boss) : '') + t('m.' + m.type) + (m.shiny ? ' ✦' : '');
+    const title = (m.boss != null ? t('boss.' + m.boss) : '') + t('m.' + m.type) + (m.shiny ? ' ' + ui('sparkle') : '');
     return head(img(monsterIcon(m.type), 'mimg'), title, t('ui.lv', { lv: st.level })) + `<div class="win-body">
       <div class="kv"><span>HP</span><b>${fmt(Math.max(0, m.hp))}/${fmt(st.maxHp)}</b><span>${t('ui.atk')}</span><b>${fmt(st.atk)}</b><span>${t('ui.def')}</span><b>${fmt(st.def)}</b></div>
       <div>${t('ui.drops')}: ${drops}</div><p class="meta">${t('ui.sharedLevel')}</p></div>`;
@@ -485,6 +502,15 @@ function buildingBody(c: Ctl, b: Building): string {
   const s = c.s;
   const d = BUILDINGS[b.type];
   let h = `<div class="desc">${t('bd.' + b.type)}</div>${hotNow(s, b.type) ? `<p class="good">${t('ui.hotDesc')}</p>` : ''}`;
+  if (d.wonder && !finished(b)) {
+    // a wonder under construction: progress, what the next stage needs, and the button to build it
+    const k = (b.stage ?? 0) + 1, c = wonderCost(b.type, k);
+    h += `<div class="box"><b>${t('ui.wonderStage', { k: b.stage ?? 0, n: WONDER_STAGES })}</b> ${bar((b.stage ?? 0) / WONDER_STAGES)}
+      <div>${t('ui.nextStage')}: ${costHtml(s, c)} <span class="tag">${img(itemIcon(c.mat))}${t('item.' + c.mat)} ${fmt(s.items[c.mat] ?? 0)}/${c.count}</span></div>
+      ${btn('wonder:' + b.id, t('ui.advance'), { disabled: !canAdvance(s, b), cls: 'primary' })}</div>`;
+    return `<div class="win-body">${h}</div>`;
+  }
+  if ((b.type === 'quarry' || b.type === 'mineShaft') && s.vein != null) h += `<p class="meta">${t('ui.vein', { p: Math.round(s.vein * 100) })}</p>`;
   h += `<div class="kv"><span>${t('ui.exp')}</span><b>${bar(b.exp / bldExpNeed(b.level))}</b>
     <span>${t('ui.attraction')}</span><b>${(d.attraction * lvMult(b.level)).toFixed(1)}</b>`;
   if (d.price > 0) h += `<span>${t('ui.price')}</span><b>${fmt(d.price * lvMult(b.level))}</b>`;
@@ -520,6 +546,9 @@ function buildingBody(c: Ctl, b: Building): string {
 
 let buildCat: Category = 'housing';
 export const setBuildCat = (c: string) => { buildCat = c as Category; };
+let paving: number | null = null;
+export const setRoadStyle = (k: number) => { paving = k; };
+export const roadStyle = () => paving ?? undefined;
 
 function hoursText(type: string): string {
   const d = BUILDINGS[type];
@@ -589,10 +618,10 @@ export function reportHtml(s: GameState, i: number): string {
   return `<div class="win modal-box wide paper"><div class="win-title"><b>${t('ui.reportTitle', { y: r.year, v: `@village.${s.village}.name` })}</b>${btn('closeModal', '✕', { cls: 'x' })}</div><div class="win-body">
     <div class="kv">${row('ui.rIncome', fmt(r.income))}${row('ui.kills', fmt(r.kills))}${row('ui.touristTotal', fmt(r.tourists))}
     ${row('ui.population', fmt(r.residents))}${row('score.buildings', fmt(r.buildings))}${row('ui.rBosses', fmt(r.bosses))}${row('ui.rExpeditions', fmt(r.expeditions))}</div>
-    ${r.star ? `<p>⭐ ${t('ui.rStar', { n: npcName(r.star.name), c: '@cls.' + r.star.cls, k: r.star.kills, lv: r.star.level })}</p>` : ''}
-    ${r.shop ? `<p>🏆 ${t('ui.rShop', { b: '@b.' + r.shop.type, v: r.shop.income })}</p>` : ''}
-    ${r.rank != null ? `<p>📜 ${t('ui.rFame', { r: `@fame.${r.rank}`, v: r.fame ?? 0, c: r.commissions ?? 0 })}</p>` : ''}
-    ${r.rival ? `<p>⚔ ${t('ui.rRival', { a: npcName(r.rival.a), b: npcName(r.rival.b), ak: r.rival.ak, bk: r.rival.bk, al: r.rival.al, bl: r.rival.bl })}</p>` : ''}
+    ${r.star ? `<p>${ui('star')} ${t('ui.rStar', { n: npcName(r.star.name), c: '@cls.' + r.star.cls, k: r.star.kills, lv: r.star.level })}</p>` : ''}
+    ${r.shop ? `<p>${ui('trophy')} ${t('ui.rShop', { b: '@b.' + r.shop.type, v: r.shop.income })}</p>` : ''}
+    ${r.rank != null ? `<p>${ui('scroll')} ${t('ui.rFame', { r: `@fame.${r.rank}`, v: r.fame ?? 0, c: r.commissions ?? 0 })}</p>` : ''}
+    ${r.rival ? `<p>${ui('swords')} ${t('ui.rRival', { a: npcName(r.rival.a), b: npcName(r.rival.b), ak: r.rival.ak, bk: r.rival.bk, al: r.rival.al, bl: r.rival.bl })}</p>` : ''}
     ${events ? `<h3>${t('ui.rEvents')}</h3><ul class="news">${events}</ul>` : ''}
     <div class="btns center">${btn('reportShare:' + i, t('ui.shareImage'), { cls: 'primary' })}${btn('closeModal', t('ui.close'))}</div></div></div>`;
 }

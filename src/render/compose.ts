@@ -87,6 +87,6 @@ export function layerNames(o: { outfit: string; head: string; beard: string; ite
   if (o.beard) names.push(`p/beard/${o.beard}`);
   if (!['knightHelm', 'hood', 'mitre'].includes(o.head) || o.style === 2) names.push(`p/hair/${o.style}`);
   if (o.head) names.push(`p/head/${o.head}`);
-  names.push(`p/item/${o.item}`);
+  names.push(frame === 2 ? `p/itemA/${o.item}` : `p/item/${o.item}`);
   return names;
 }

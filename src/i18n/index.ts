@@ -24,8 +24,9 @@ export function setLang(l: string) {
 
 export function detectLang(saved?: string): string {
   if (saved && LANGS[saved]) return saved;
-  const nav = (navigator.language || 'en').toLowerCase();
-  for (const l of Object.keys(LANGS)) if (nav.startsWith(l)) return l;
+  // first visit: the first supported language in the browser's preference list, else English
+  const prefs = (typeof navigator === 'undefined' ? [] : navigator.languages?.length ? navigator.languages : [navigator.language]).filter(Boolean);
+  for (const p of prefs) { const nav = p.toLowerCase(); for (const l of Object.keys(LANGS)) if (nav.startsWith(l)) return l; }
   return 'en';
 }
 

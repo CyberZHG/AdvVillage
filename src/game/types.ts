@@ -1,7 +1,7 @@
 import type { ClassKey, NodeKind } from './data';
 
 export interface P { x: number; y: number }
-export interface Building { id: number; type: string; x: number; y: number; rot: number; level: number; exp: number; yi?: number; door?: P | null; goodsOff?: boolean }
+export interface Building { id: number; type: string; x: number; y: number; rot: number; level: number; exp: number; yi?: number; door?: P | null; goodsOff?: boolean; stage?: number }
 export interface ResNode { id: number; kind: NodeKind; x: number; y: number; amount: number; v: number; born?: number }
 export interface Monster {
   id: number; type: string; x: number; y: number; hp: number; tx: number; ty: number;
@@ -32,11 +32,13 @@ export interface Npc {
   profile: number; plan: number[]; noFood: number; kills: number;
   title?: string; titles?: string[]; fk?: Record<string, number>; partner?: number | null; spouse?: number | null;
   downs?: number; yk?: number; exps?: number; bosses?: number;
-  rival?: number | null; bio?: LogEntry[]; vip?: string; promoted?: boolean; sk?: Record<string, number>; tired?: number;
+  rival?: number | null; bio?: LogEntry[]; vip?: string; promoted?: boolean; sk?: Record<string, number>; tired?: number; lead?: number;
 }
 
 export interface Profile { name: number; job: string; look: Look; level: number; exp: number; visits: number }
 export interface Quest { id: number; type: string; need: number; done: number; reward: number; until: number; members: number[] }
+// tile indices per terrain kind
+export interface Terrain { water: number[]; rock: number[]; bog: number[]; thicket: number[]; vent?: number[]; cave?: number[]; flowers?: number[] }
 export interface Expedition {
   loc: string; state: 'recruit' | 'depart' | 'away'; members: number[]; until: number;
   wins: number; losses: number; loot: Record<string, number>; nextDay: number;
@@ -78,7 +80,9 @@ export interface GameState {
   v: number; village: string; vlv: number; roads: number[]; time: number; day: number; money: number;
   items: Record<string, number>;
   buildings: Building[]; nodes: ResNode[]; monsters: Monster[]; npcs: Npc[]; profiles: Profile[];
-  quests: Quest[]; exp: Expedition | null; expLast?: number;
+  quests: Quest[]; exp: Expedition | null; expLast?: number; terrain?: Terrain; rstyle?: Record<number, number>;
+  // village mechanics: ore vein richness, river boat in transit, roads buried by sand, and per-village tallies
+  vein?: number; boatUntil?: number; buried?: { i: number; until: number }[]; vstat?: Record<string, number>;
   mlv: Record<string, { level: number; exp: number }>;
   wlv: Record<string, number>;
   disc: string[]; seen: string[];
@@ -89,7 +93,7 @@ export interface GameState {
   fame: number; commissions: Commission[]; cseason: number; rivals: Rivalry[]; nextVip: number; vips: string[];
   notes: LogEntry[]; savedAt?: number;
   research: Record<string, number>; researching: { k: string; until: number } | null; rqueue: string[];
-  auto: { research: boolean; forge: boolean; upgrade: boolean }; depth: Record<string, number>;
+  auto: { research: boolean; forge: boolean; upgrade: boolean; build?: boolean }; depth: Record<string, number>;
   pets: Pet[]; cat: Cat | null; hist: Month[]; histBase: Month;
   stats: {
     income: number; lastIncome: number; kills: number; tourists: number;

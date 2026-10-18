@@ -18,8 +18,10 @@
 html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; -webkit-text-size-adjust: 100%; background: #1b2333; color: var(--text); font-family: var(--font); font-size: 14px; }
 canvas#game { position: fixed; inset: 0; width: 100vw; height: 100vh; image-rendering: pixelated; touch-action: none; cursor: pointer; }
 .hidden { display: none !important; }
-img.ic { width: 18px; height: 18px; image-rendering: pixelated; vertical-align: -4px; margin-right: 2px; }
-img.ic.big { width: 32px; height: 32px; }
+img.ic { width: 24px; height: 24px; image-rendering: pixelated; vertical-align: -7px; margin: -2px 1px -2px 0; }
+img.ic.big { width: 36px; height: 36px; }
+img.tic { width: 32px; height: 22px; image-rendering: pixelated; vertical-align: middle; margin-right: 3px; }
+.paving .btn { padding: 2px 6px; }
 img.bimg { width: 64px; image-rendering: pixelated; }
 img.bimg.sm { width: 40px; }
 img.pimg { width: 38px; image-rendering: pixelated; }

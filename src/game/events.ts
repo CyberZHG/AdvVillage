@@ -1,5 +1,5 @@
 import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, SOUTH_EXIT } from './constants';
-import { ITEMS, MONSTERS, villageDef, zoneMonsters } from './data';
+import { ITEMS, MONSTERS, culture, villageDef, zoneMonsters } from './data';
 import { addItem, assignHousing, freeBeds, log, makeNpc, monsterStats, newId, year } from './state';
 import { chance, pick, randi, weighted } from './util';
 import { randomZoneTile, villageDist } from './world';
@@ -7,13 +7,23 @@ import type { GameState, Monster } from './types';
 
 export const SEASONS = ['spring', 'summer', 'autumn', 'winter'] as const;
 export const season = (s: GameState) => Math.floor((s.day % DAYS_PER_YEAR) / DAYS_PER_MONTH / 3);
-const monthOfSeason = (s: GameState) => Math.floor((s.day % DAYS_PER_YEAR) / DAYS_PER_MONTH) % 3;
 const dayOfMonth = (s: GameState) => s.day % DAYS_PER_MONTH;
 
 export const FESTIVALS = ['flower', 'fireworks', 'harvest', 'lantern'];
-// each season's middle month hosts its festival on days 5-7
-export const festival = (s: GameState): string | null =>
-  monthOfSeason(s) === 1 && dayOfMonth(s) >= 4 && dayOfMonth(s) <= 6 ? FESTIVALS[season(s)] : null;
+// [festival, month (0-based), first day (0-based)]; each lasts three days. The default puts one in the middle
+// month of every season; Chinese and Japanese calendars hold their new year on the first days of spring instead
+const CALENDAR: Record<string, [string, number, number][]> = {
+  en: [['flower', 1, 4], ['fireworks', 4, 4], ['harvest', 7, 4], ['lantern', 10, 4]],
+  zh: [['lantern', 0, 0], ['flower', 1, 4], ['fireworks', 4, 4], ['harvest', 7, 4]],
+  ja: [['lantern', 0, 0], ['flower', 1, 4], ['fireworks', 4, 4], ['harvest', 7, 4]],
+};
+const festivalAt = (s: GameState) => {
+  const month = Math.floor((s.day % DAYS_PER_YEAR) / DAYS_PER_MONTH), d = dayOfMonth(s);
+  return (CALENDAR[culture.lang] ?? CALENDAR.en).find(([, m, from]) => m === month && d >= from && d < from + 3) ?? null;
+};
+export const festival = (s: GameState): string | null => festivalAt(s)?.[0] ?? null;
+// true on the festival's opening day
+export const festivalStarts = (s: GameState) => { const f = festivalAt(s); return !!f && dayOfMonth(s) === f[2]; };
 
 // what people want changes with the weather: these places draw bigger crowds and pay more in their season
 export const SEASON_HOT: string[][] = [
@@ -29,19 +39,24 @@ export function touristMult(s: GameState) {
   if (hasEffect(s, 'bard')) m *= 1.4;
   if (s.weather === 'rain') m *= 0.7;
   if (s.weather === 'storm') m *= 0.4;
+  if (s.weather === 'fog') m *= 0.85;
+  if (s.weather === 'sandstorm') m *= 0.4;
   return m;
 }
 export const spendMult = (s: GameState) => (festival(s) ? 1.2 : 1);
-export const monsterMult = (s: GameState) => (hasEffect(s, 'frenzy') ? 1.6 : 1);
+// in the marsh village fog draws more monsters out
+export const monsterMult = (s: GameState) => (hasEffect(s, 'frenzy') ? 1.6 : 1) * (s.village === 'mist' && s.weather === 'fog' ? 1.5 : 1);
 
 function rollWeather(s: GameState) {
   const g = villageDef(s.village).ground, se = season(s);
   const snowy = g === 'snow' || se === 3;
   const r = Math.random();
   if (snowy && r < (g === 'snow' ? 0.4 : 0.3)) return 'snow';
-  if (g === 'sand') return r < 0.05 ? 'storm' : 'clear';
+  if (g === 'sand') return r < 0.07 ? 'sandstorm' : 'clear';
   if (r < 0.04 + (se === 1 ? 0.04 : 0)) return 'storm';
   if (r < (g === 'marsh' ? 0.35 : 0.2)) return 'rain';
+  // fog rolls in on damp mornings; the marsh is wrapped in it often
+  if (r < (g === 'marsh' ? 0.6 : se === 0 || se === 2 ? 0.27 : 0.22)) return 'fog';
   return 'clear';
 }
 
@@ -91,7 +106,7 @@ const BOSS_TITLES = 6;
 function spawnBoss(s: GameState) {
   const g = villageDef(s.village).ground;
   const zone = year(s) >= 3 ? 2 : 1;
-  const list = zoneMonsters(zone, g).filter((k) => MONSTERS[k].zone >= 0);
+  const list = zoneMonsters(zone, g, s.village).filter((k) => MONSTERS[k].zone >= 0);
   if (!list.length) return;
   const type = pick(list);
   const fighters = s.npcs.filter((n) => n.role === 'fighter').map((n) => n.level).sort((a, b) => b - a).slice(0, 6);
@@ -114,7 +129,7 @@ export function eventsDaily(s: GameState) {
   s.weather = rollWeather(s);
   s.effects = s.effects.filter((e) => e.until > s.time);
   const f = festival(s);
-  if (f && dayOfMonth(s) === 4) log(s, 'ev.festival', { f: `@fest.${f}` });
+  if (f && festivalStarts(s)) log(s, 'ev.festival', { f: `@fest.${f}` });
   if (s.merchant && s.time > s.merchant.until) { s.merchant = null; log(s, 'ev.merchantLeft'); }
   if (!s.merchant && s.day > 20 && chance(1 / 30)) newMerchant(s);
   if (!f && s.day > 10 && chance(0.06)) {

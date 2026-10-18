@@ -4,7 +4,7 @@ import { residents } from './state';
 import { COMBOS } from './combos';
 import { festival } from './events';
 import { fameRank } from './fame';
-import { BUILDINGS, ITEMS } from './data';
+import { BUILDINGS, ITEMS, bldAvailable, finished } from './data';
 import type { GameState } from './types';
 import type { Meta } from './save';
 
@@ -14,6 +14,7 @@ const maxFighter = (s: GameState) => Math.max(0, ...s.npcs.filter((n) => n.role 
 const maxBld = (s: GameState) => Math.max(0, ...s.buildings.map((b) => b.level));
 const maxForge = (s: GameState) => Math.max(0, ...Object.values(s.wlv));
 const has = (s: GameState, type: string) => s.buildings.some((b) => b.type === type);
+const wondersDone = (s: GameState) => s.buildings.filter((b) => BUILDINGS[b.type].wonder && finished(b));
 
 export const ACHIEVEMENTS: [string, Check][] = [
   ['firstBuild', (s) => s.buildings.length >= 3],
@@ -64,6 +65,14 @@ export const ACHIEVEMENTS: [string, Check][] = [
   ['combo1', (s) => s.comboSeen.length >= 1],
   ['comboAll', (s) => COMBOS.every((c) => s.comboSeen.includes(c.key))],
   ['festival', (s) => festival(s) !== null],
+  ['villMaple', (s) => (s.vstat?.boats ?? 0) >= 6],
+  ['villIron', (s) => s.village === 'iron' && has(s, 'mineShaft') && has(s, 'quarry')],
+  ['villMist', (s) => (s.vstat?.fogKills ?? 0) >= 100],
+  ['villFrost', (s) => (s.vstat?.iceFish ?? 0) >= 20],
+  ['villSun', (s) => (s.vstat?.dug ?? 0) >= 20],
+  ['wonder1', (s) => wondersDone(s).length >= 1],
+  ['wonder3', (s) => wondersDone(s).length >= 3],
+  ['wonderAll', (s) => { const all = Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].wonder && bldAvailable(s, k)); return all.length > 0 && all.every((k) => wondersDone(s).some((b) => b.type === k)); }],
   ['newspaper', (s) => s.reports.length >= 1],
   ['commission1', (s) => s.stats.commissions >= 1],
   ['commission30', (s) => s.stats.commissions >= 30],

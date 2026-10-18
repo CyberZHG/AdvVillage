@@ -15,6 +15,8 @@ export interface MonsterDef {
   fam: Fam; hp: number; atk: number; def: number; base: number;
   // 0..2 = map zone, -1 = expedition only
   zone: number; drops: [string, number][]; biomes?: Ground[];
+  // roams only around this village
+  village?: string;
 }
 
 type Row = [string, Fam, number, number, [string, number][], Ground[]?, number?];
@@ -22,6 +24,11 @@ type Row = [string, Fam, number, number, [string, number][], Ground[]?, number?]
 // key, family, base level, zone, drops, biomes, strength multiplier
 const ROWS: Row[] = [
   ['slime', 'slime', 1, 0, [['gel', 3], ['meat', 1]]],
+  ['mossTurtle', 'crab', 4, 0, [['shell', 2], ['pearl', 0.3], ['herb', 1]]],
+  ['rockMole', 'beast', 7, 0, [['claw', 2], ['silverOre', 0.6], ['iron', 1]]],
+  ['bogLantern', 'wisp', 12, 1, [['wispLight', 2], ['spore', 1]]],
+  ['frostFox', 'beast', 14, 1, [['pelt', 2], ['frostShard', 0.8]]],
+  ['dustDevil', 'wisp', 10, 1, [['dust', 2], ['amber', 0.5]]],
   ['bat', 'flyer', 2, 0, [['wing', 2], ['meat', 1]]],
   ['rat', 'beast', 1, 0, [['meat', 2], ['fang', 1]], undefined, 0.7],
   ['bee', 'flyer', 3, 0, [['venom', 1], ['wing', 1]]],
@@ -170,5 +177,8 @@ export const RARE_WEIGHT = 1 / 30;
 export const mapZone = (d: MonsterDef) => (d.zone >= 0 ? d.zone : d.base < 10 ? 0 : d.base < 25 ? 1 : 2);
 export const spawnWeight = (d: MonsterDef) => (d.zone >= 0 ? 1 : RARE_WEIGHT);
 
-export const zoneMonsters = (zone: number, ground: Ground) =>
-  Object.keys(MONSTERS).filter((k) => mapZone(MONSTERS[k]) === zone && (!MONSTERS[k].biomes || MONSTERS[k].biomes!.includes(ground)));
+export const zoneMonsters = (zone: number, ground: Ground, village = '') =>
+  Object.keys(MONSTERS).filter((k) => mapZone(MONSTERS[k]) === zone && (!MONSTERS[k].biomes || MONSTERS[k].biomes!.includes(ground)) && (!MONSTERS[k].village || MONSTERS[k].village === village));
+// each village has a creature of its own, and it turns up a little more often than the rest
+const LOCAL: Record<string, string> = { mossTurtle: 'maple', rockMole: 'iron', bogLantern: 'mist', frostFox: 'frost', dustDevil: 'sun' };
+for (const [k, v] of Object.entries(LOCAL)) MONSTERS[k].village = v;
