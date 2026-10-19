@@ -3,6 +3,7 @@ import { DAY } from '../game/constants';
 import { npcById } from '../game/state';
 import type { GameState } from '../game/types';
 import { draw, humanSprite, monsterSprite } from './art';
+import { FRAME } from './compose';
 
 export const EXP_W = 220, EXP_H = 36;
 const X0 = 16, X1 = 204, BASE = 31;
@@ -15,10 +16,13 @@ const PAL: Record<string, string[]> = {
   tomb: ['#c8905a', '#d4b070', '#b08c50', '#f0e0a0', '#a87448'], frozen: ['#6a84aa', '#e8f0f8', '#b8c8dc', '#8ad0ff', '#c8d8ec'],
   volcano: ['#4a2420', '#5a3a30', '#e05a20', '#ff9a40', '#2a1414'], sky: ['#6a9ad8', '#e8eef8', '#c0cce0', '#ffe070', '#a8c4ec'],
   ridge: ['#5a5a7a', '#7a7060', '#5a5246', '#e06050', '#3e3e56'], abyss: ['#1a1028', '#3a2a4a', '#6a3a8a', '#c070ff', '#2c1c40'],
+  coralIsle: ['#6ac0e8', '#e8d4a0', '#c8b080', '#f07a6a', '#3a8ab0'], deepForge: ['#2a1a18', '#5a4438', '#e0702a', '#ffb040', '#3a2420'],
+  sunkenShrine: ['#3a5a64', '#4a6a5a', '#2e4a44', '#c8e8d8', '#2a4a50'], glacierHeart: ['#8ab8e0', '#e8f4fc', '#b8d8ec', '#ffffff', '#a8c8e4'],
+  lostCity: ['#e8a868', '#e0c080', '#c09a5a', '#f8e090', '#b0784a'],
 };
 // how the far skyline is shaped: rolling hills, jagged peaks, or a forest edge
 const SKYLINE: Record<string, 'hill' | 'peak' | 'trees'> = {
-  woods: 'trees', marsh: 'trees', mine: 'peak', frozen: 'peak', volcano: 'peak', ridge: 'peak', abyss: 'peak',
+  woods: 'trees', marsh: 'trees', mine: 'peak', frozen: 'peak', volcano: 'peak', ridge: 'peak', abyss: 'peak', sunkenShrine: 'trees', deepForge: 'peak', glacierHeart: 'peak',
 };
 
 function skyline(ctx: CanvasRenderingContext2D, loc: string, color: string) {
@@ -46,6 +50,14 @@ export function drawExpBar(cv: HTMLCanvasElement, s: GameState, time: number) {
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, EXP_W, BASE - 3);
   skyline(ctx, e.loc, PAL[e.loc]?.[4] ?? '#2f5a3a');
+  // the sky expedition passes floating islands, bobbing gently, with water spilling off their edges
+  if (e.loc === 'sky') for (let k = 0; k < 4; k++) {
+    const x = Math.round(((k * 61 + 20 - time * 3) % (EXP_W + 40) + EXP_W + 40) % (EXP_W + 40) - 20), y = Math.round(BASE - 22 + (k % 2) * 6 + Math.sin(time * 0.8 + k * 2) * 1.5), w = 10 + (k % 3) * 4;
+    ctx.fillStyle = '#6a5a48'; for (let r = 0; r < 5; r++) ctx.fillRect(x + r, y + 2 + r, w - r * 2, 1);
+    ctx.fillStyle = '#5aa83a'; ctx.fillRect(x, y, w, 2); ctx.fillStyle = '#8ad05a'; ctx.fillRect(x + 1, y, w - 3, 1);
+    if (k % 2 === 0) { ctx.fillStyle = '#3a7a34'; ctx.fillRect(x + 3, y - 3, 3, 3); ctx.fillStyle = '#5a3a22'; ctx.fillRect(x + 4, y - 1, 1, 1); }
+    ctx.fillStyle = 'rgba(220,240,255,0.8)'; for (let r = 0; r < 4; r++) ctx.fillRect(x + w - 2, y + 2 + ((r + Math.floor(time * 6)) % 6), 1, 1);
+  }
   ctx.fillStyle = ground;
   ctx.fillRect(0, BASE - 3, EXP_W, EXP_H - BASE + 3);
   ctx.fillStyle = shade;
@@ -74,7 +86,7 @@ export function drawExpBar(cv: HTMLCanvasElement, s: GameState, time: number) {
   const walking = e.state !== 'recruit' && !fighting;
   ms.forEach((n, k) => {
     const x = e.state === 'recruit' ? X0 + 4 + k * 11 : head - k * 11;
-    const frame = walking ? Math.floor(time * 6 + k) % 2 : 0;
+    const frame = walking ? FRAME.walk[Math.floor(time * 8 + k) % 4] : 0;
     const lunge = fighting && Math.floor(time * 5 + k) % 3 === 0 ? 1 : 0;
     draw(ctx, humanSprite(n!.role, n!.cls, n!.look, frame, false), Math.round(x + lunge), BASE);
   });

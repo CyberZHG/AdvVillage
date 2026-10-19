@@ -1,5 +1,5 @@
 import {
-  BUILDINGS, EQUIP, EXPEDITIONS, EXPEDITION_PARTY, FOODS, ITEMS, MONSTERS, NODE_ITEM, finished, villageDef, zoneMonsters, spawnWeight,
+  BUILDINGS, EQUIP, EXPEDITIONS, EXPEDITION_PARTY, FOODS, ITEMS, MONSTERS, NODE_ITEM, culture, finished, hasPerk, villageDef, zoneMonsters, spawnWeight,
   shopTier, equipByKey, isOpen, isPeak, type EquipDef, type NodeKind,
 } from './data';
 import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, EAST_EXIT, MAP, SCORE_YEAR, SOUTH_EXIT } from './constants';
@@ -12,16 +12,20 @@ import { canForge, computeScore, earn, expeditionAvailable, forgeUpgrade, goodsI
 import { rbonus, researchTick } from './research';
 import { catDaily, catTick, catTouristBonus } from './cat';
 import { autoDaily } from './auto';
-import { CLASS_SKILL, chargeMult, mendPower, procChance, skillMult, train } from './skills';
+import { LEGEND, LEGEND_TITLE, megaDone, hasLocal, villageDailyExtras } from './village';
+import { championDown, championTick, championsDaily, syncFinal } from './champions';
+import { boon } from './legacy';
+import { hasJob, jobLinger, jobSpot, jobsDaily } from './jobs';
+import { CLASS_SKILL, SCHOOL, chargeMult, mendPower, procChance, schoolMult, skillMult, train } from './skills';
 import { petBonus, petsTick, tryTame } from './pets';
 import { commissionsDaily } from './commissions';
 import { addFame, fameTouristMult, vipDaily, vipLeave, vipSpend, vipVisit } from './fame';
 import { makeLook, randomJob } from './looks';
-import { currentBoss, eventsDaily, festival, festivalStarts, season, hasEffect, hotNow, monsterMult, spendMult, touristMult } from './events';
+import { gatherMult, eventsDaily, festival, festivalStarts, observance, season, hasEffect, hotNow, monsterMult, spendMult, touristMult } from './events';
 import { bondFight, checkPromotion, checkTitles, emote, familyDaily, partnerOf, rivalsDaily, rivalsMonthly } from './social';
 import { closeYear } from './report';
 import { chance, dist, pick, rand, randi, weighted } from './util';
-import { ROAD_SPEED, blocked, doorOf, canStep, dryLine, edgeEntry, impassable, findPath, inVillage, isBuried, isFrozen, setFrozen, slowAt, syncBuried, isRoad, randomStreetTile, randomVillageTile, randomZoneTile, segmentAvoidsVillage, villageDist, zoneOf } from './world';
+import { ROAD_SPEED, isBattlefield, landmarks, SPRING, VENT, terrainAt, blocked, doorOf, canStep, dryLine, edgeEntry, halfLevel, impassable, findPath, setFlood, inVillage, isBuried, isFrozen, setFrozen, slowAt, syncBuried, isRoad, randomStreetTile, randomVillageTile, randomZoneTile, segmentAvoidsVillage, villageDist, zoneOf } from './world';
 import type { Building, Expedition, GameState, Goal, Monster, Npc, P, Profile } from './types';
 
 const JOB_NODE: Record<string, NodeKind> = { woodcutter: 'tree', miner: 'rock', forager: 'bush' };
@@ -41,11 +45,14 @@ const MONSTER_INTERVAL = 1.2;
 const SHINY_RATE = 1 / 150;
 const DEPTH_LEVELS = 4;
 
+let nowT = 0;
 export function step(s: GameState, dt: number) {
+  nowT = s.time;
   s.time += dt;
   const d = Math.floor(s.time / DAY);
   if (d !== s.day) { s.day = d; daily(s); }
-  setFrozen(s.village === 'frost' && season(s) === 3);
+  // in winter the rivers and lakes freeze hard enough to walk on, except in the desert
+  setFrozen(season(s) === 3 && villageDef(s.village).ground !== 'sand');
   const t = s.timers;
   t.spawn += dt;
   if (t.spawn >= 1) { t.spawn = 0; spawnMonster(s); }
@@ -56,6 +63,7 @@ export function step(s: GameState, dt: number) {
   touristSpawn(s, dt);
   for (const n of [...s.npcs]) updateNpc(s, n, dt);
   for (const m of [...s.monsters]) updateMonster(s, m, dt);
+  syncFinal(s);
   expeditionTick(s);
   catTick(s, dt);
   petsTick(s, dt);
@@ -87,8 +95,21 @@ function leave(s: GameState, n: Npc) {
 
 function wait(n: Npc, t: number) { n.state = 'wait'; n.timer = t; n.path = []; }
 
+// couriers run; rickshaws carry tourists about faster
+let rickshaws = false;
+// each village's own way of getting about out in the wilds: camels in the desert, dog sleds in the snow, mine carts
+// on the iron town's roads, boardwalks over the marsh, ferries for the maple village's visitors
+let rideVillage = '';
+export const rides = (village: string, n: { id: number; role: string; x: number; y: number }, onRoad: boolean, outside: boolean) =>
+  outside && n.role !== 'civilian' && ((village === 'sun' || village === 'frost') ? n.id % 2 === 0 : (village === 'iron' || village === 'mist') ? onRoad : false);
+const rideMult = (n: Npc) => {
+  if (!rideVillage) return 1;
+  const x = Math.floor(n.x), y = Math.floor(n.y), outside = villageDist(x, y) > 0;
+  if (rideVillage === 'maple') return n.role === 'tourist' ? 1.15 : 1;
+  return rides(rideVillage, n, isRoad(x, y), outside) ? 1.2 : 1;
+};
 const speedOf = (n: Npc) =>
-  SPEED[n.role] * (n.role === 'gatherer' ? 1 + 0.05 * Math.sqrt(n.level - 1) : 1) * (n.carry != null ? 0.75 : 1);
+  SPEED[n.role] * (n.role === 'gatherer' ? 1 + 0.05 * Math.sqrt(n.level - 1) : 1) * (n.carry != null ? 0.75 : 1) * (n.job === 'courier' ? 1.6 : 1) * (n.role === 'tourist' && rickshaws ? 1.15 : 1) * rideMult(n);
 
 function move(n: Npc, dt: number): boolean {
   const tx = Math.floor(n.x), ty = Math.floor(n.y);
@@ -131,7 +152,7 @@ const BIO_LEVELS = new Set([10, 25, 50, 100, 150, 200, 300, 500, 1000, 2000, 500
 
 function gainNpcExp(s: GameState, n: Npc, amount: number) {
   const before = n.level;
-  const boost = n.role === 'fighter' ? (hasEffect(s, 'sage') ? 1.5 : 1) * (1 + rbonus(s, 'training')) * skillMult(n, 'instinct') : 1;
+  const boost = n.role === 'fighter' ? (hasEffect(s, 'sage') ? 1.5 : 1) * (1 + rbonus(s, 'training')) * skillMult(n, 'instinct') * (hasPerk(s.buildings, 'academy') ? 1.1 : 1) * schoolMult(n, 'exp') * boon('exp') : 1;
   const ups = gainExp(n, amount * boost);
   if (!ups) return;
   checkPromotion(s, n);
@@ -149,12 +170,26 @@ function gainMonsterExp(s: GameState, type: string, amount: number) {
 
 // ---------- npc update ----------
 
+const nearVent = (n: Npc) => { const x = Math.floor(n.x), y = Math.floor(n.y); for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (terrainAt(x + dx, y + dy) === VENT || terrainAt(x + dx, y + dy) === SPRING) return true; return false; };
 function updateNpc(s: GameState, n: Npc, dt: number) {
   if (n.state !== 'away' && n.state !== 'down' && n.state !== 'carried') {
     n.hunger = Math.max(0, n.hunger - HUNGER_RATE * mods(s).hunger * dt);
     n.mood = Math.max(0, n.mood - MOOD_RATE * dt);
     if (worker(n) && n.state !== 'inside' && n.goal !== 'camp') n.tired = Math.min(1, (n.tired ??= Math.random()) + TIRE_RATE * dt);
-    if (n.role === 'fighter' && n.state !== 'fight' && n.state !== 'inside') n.hp = Math.min(maxHp(s, n), n.hp + maxHp(s, n) * 0.003 * dt);
+    // hot springs: steam vents mend anyone resting beside them several times faster
+    if (n.role === 'fighter' && n.state !== 'fight' && n.state !== 'inside') n.hp = Math.min(maxHp(s, n), n.hp + maxHp(s, n) * (nearVent(n) ? 0.015 : 0.003) * dt);
+  }
+  // coming back out of the cave system from a different mouth
+  if (n.state === 'away' && n.goal === 'cave') {
+    n.timer -= dt;
+    if (n.timer <= 0) {
+      const others = (s.terrain?.cave ?? []).filter((c) => c !== n.goalId), c = others.length ? pick(others) : n.goalId;
+      const cx = c % MAP, cy = (c / MAP) | 0, mouth = [[1, 0], [0, 1], [-1, 0], [0, -1]].map(([dx, dy]) => [cx + dx, cy + dy]).find(([x, y]) => !impassable(x, y)) ?? [cx + 1, cy];
+      n.x = mouth[0] + 0.5; n.y = mouth[1] + 0.5; n.state = 'idle'; n.goal = null;
+      if (chance(0.6)) { const it = pick(['iron', 'silverOre', 'crystal', 'stone', 'goldOre']); n.bag[it] = (n.bag[it] ?? 0) + 1; }
+      emote(s, n, 'star');
+    }
+    return;
   }
   switch (n.state) {
     case 'idle': decide(s, n); break;
@@ -235,8 +270,14 @@ function pickTarget(s: GameState, n: Npc, st: Stats): Monster | null {
   const q = n.quest != null ? s.quests.find((q) => q.id === n.quest) : undefined;
   const targeted = new Map<number, number>();
   for (const o of s.npcs) if (o.role === 'fighter' && (o.state === 'hunt' || o.state === 'fight')) targeted.set(o.goalId, (targeted.get(o.goalId) ?? 0) + 1);
-  const boss = currentBoss(s);
-  if (boss && n.level >= (boss.lv ?? 1) * 0.5 && n.hp > st.maxHp * 0.7) return boss;
+  // the nearest boss this fighter is fit to face; only half the guild takes on a champion, the rest keep the wilds clear
+  let boss: Monster | null = null, bd = Infinity;
+  for (const m of s.monsters) {
+    if (m.boss == null || (m.champ && n.id % 2) || n.level < (m.lv ?? 1) * (m.champ ? 0.3 : 0.5) || n.hp <= st.maxHp * 0.7) continue;
+    const d = dist(n.x, n.y, m.x, m.y);
+    if (d < bd) { bd = d; boss = m; }
+  }
+  if (boss) return boss;
   const mate = partnerOf(s, n);
   const mateTarget = mate && (mate.state === 'hunt' || mate.state === 'fight') ? mate.goalId : -1;
   let best: Monster | null = null, bs = -Infinity;
@@ -276,6 +317,16 @@ function decideFighter(s: GameState, n: Npc) {
   const m = pickTarget(s, n, st);
   if (m) { n.state = 'hunt'; n.goalId = m.id; n.path = []; n.repath = 0; return; }
   if (bagCount(n) > 0) return goBuilding(s, n, guild(s), 'deposit');
+  // now and then an adventurer explores: through the caves, or up to the cabin or the ruined tower on the heights
+  const caves = s.terrain?.cave ?? [];
+  if (caves.length >= 2 && !isNight(s) && chance(0.04)) {
+    const c = pick(caves), cx = c % MAP, cy = (c / MAP) | 0, mouth = [[1, 0], [0, 1], [-1, 0], [0, -1]].map(([dx, dy]) => [cx + dx, cy + dy]).find(([x, y]) => !impassable(x, y));
+    if (mouth) { n.goalId = c; return goTo(s, n, mouth[0], mouth[1], 'cave'); }
+  }
+  if (landmarks.length && !isNight(s) && chance(0.03)) {
+    const l = pick(landmarks), spot = [[2, 0], [2, 1], [0, 2], [1, 2]].map(([dx, dy]) => [l.x + dx, l.y + dy]).find(([x, y]) => !impassable(x, y));
+    if (spot) return goTo(s, n, spot[0], spot[1], 'hut');
+  }
   const p = randomZoneTile(0);
   goTo(s, n, p.x, p.y, 'patrol');
 }
@@ -300,7 +351,7 @@ function decideGatherer(s: GameState, n: Npc) {
 }
 
 const visitable = (b: Building, tourist: boolean) => {
-  if (!finished(b)) return false;
+  if (!finished(b) || (b.ready != null && b.ready > nowT)) return false;
   const k = BUILDINGS[b.type].kind;
   return k === 'food' || k === 'shop' || k === 'fun' || k === 'decor' || k === 'guild' || (tourist && k === 'souvenir');
 };
@@ -308,12 +359,17 @@ function visitWeight(s: GameState, b: Building) {
   const t = tod(s);
   if (!isOpen(b.type, t)) return 0;
   const d = BUILDINGS[b.type];
-  return (d.attraction * lvMult(b.level) + (d.price > 0 ? 1 : 0.3)) * (isPeak(b.type, t) ? 3 : 1) * (hotNow(s, b.type) ? 2.5 : 1);
+  // the opera stage and the geisha's tea house fill up on festival days
+  const fest = festival(s) && (b.type === 'operaStage' || b.type === 'chaya') ? 1.6 : 1;
+  return (d.attraction * lvMult(b.level) + (d.price > 0 ? 1 : 0.3)) * (isPeak(b.type, t) ? 3 : 1) * (hotNow(s, b.type) ? 2.5 : 1) * fest;
 }
 
 // festival crowds gather on the streets around the village's showpiece, or the guild if there is none
 const PLAZA = ['clockTower', 'gazebo', 'fountain', 'well', 'flowerArch'];
 function plaza(s: GameState): P {
+  // New Year's visit: in Japanese villages the crowds go to the shrine
+  const shrine = culture.lang === 'ja' && festival(s) === 'lantern' && s.buildings.find((b) => b.type === 'shrine' || b.type === 'inariShrine');
+  if (shrine) { const d = doorOf(shrine); return { x: d.x, y: d.y }; }
   for (const k of PLAZA) {
     const b = s.buildings.find((o) => o.type === k);
     if (b) { const n = BUILDINGS[k].size; return { x: b.x + n / 2, y: b.y + n / 2 }; }
@@ -328,6 +384,12 @@ function goFest(s: GameState, n: Npc) {
   }
   const d = doorOf(guild(s));
   goTo(s, n, d.x, d.y, 'fest');
+}
+
+let highSpots: P[] | null = null, highFor = '';
+function highGround(s: GameState): P | null {
+  if (!highSpots || highFor !== s.village) { highFor = s.village; highSpots = []; for (let y = 0; y < MAP; y++) for (let x = 0; x < MAP; x++) if (halfLevel(x, y) >= 2 && villageDist(x, y) < 12 && !impassable(x, y)) highSpots.push({ x, y }); }
+  return highSpots.length ? pick(highSpots) : null;
 }
 
 function goLeave(s: GameState, n: Npc) { goTo(s, n, SOUTH_EXIT.x, SOUTH_EXIT.y, 'leave'); }
@@ -358,13 +420,24 @@ function decideVisitor(s: GameState, n: Npc) {
     if (b && !isOpen(b.type, tod(s))) b = weighted(s.buildings.filter((o) => visitable(o, true)), (o) => visitWeight(s, o)) ?? undefined;
     return b ? goBuilding(s, n, b, 'visit') : goLeave(s, n);
   }
+  // the night watchman walks the streets with his lantern while others sleep
+  if (isNight(s) && n.job === 'watchman' && n.home != null) { const p = randomStreetTile(s); return goTo(s, n, p.x, p.y, 'patrol'); }
+  // regional trades keep their own hours and haunts; the geisha only comes out for festivals
+  const spot = jobSpot(s, n, isNight(s), () => randomStreetTile(s));
+  if (spot) return goTo(s, n, spot.x, spot.y, 'patrol');
+  if (n.job === 'geisha' && !isNight(s)) { if (festival(s)) return goFest(s, n); const h = bld(s, n.home); if (h) return goBuilding(s, n, h, 'homeStay'); }
   if (isNight(s)) {
     const h = bld(s, n.home);
     return h ? goBuilding(s, n, h, 'sleep') : goLeave(s, n);
   }
+  // on the Double Ninth people climb to high ground
+  if (observance(s) === 'chongyang' && chance(0.5)) { const p = highGround(s); if (p) return goTo(s, n, p.x, p.y, 'patrol'); }
   if (n.hunger < 40 && tryEat(s, n)) return;
   if (festival(s) && chance(0.4)) return goFest(s, n);
   const home = bld(s, n.home);
+  // townsfolk keep indoors through the desert's midday heat, and through the marsh's dawn fog unless they fish
+  const t0 = tod(s);
+  if (home && ((s.village === 'sun' && t0 > 0.3 && t0 < 0.5) || (s.village === 'mist' && t0 < 0.15 && n.job !== 'fisherman'))) return goBuilding(s, n, home, 'homeStay');
   if (home && chance(0.45)) return goBuilding(s, n, home, 'homeStay');
   if (chance(0.8)) {
     const b = weighted(s.buildings.filter((b) => visitable(b, false)), (b) => visitWeight(s, b));
@@ -380,7 +453,13 @@ function arrive(s: GameState, n: Npc) {
   const goal = n.goal;
   const b = bld(s, n.goalId);
   switch (goal) {
-    case 'patrol': return wait(n, rand(1.5, 3.5));
+    case 'patrol': return wait(n, jobLinger(n.job) || rand(1.5, 3.5));
+    // into the cave: out of sight for a while, then out of another mouth with whatever turned up in the dark
+    case 'cave': n.state = 'away'; n.timer = rand(4, 9); n.path = []; return;
+    case 'hut': {
+      if (chance(0.5)) { const it = pick(['pelt', 'herb', 'oldCoin', 'feather', 'amber', 'meat']); n.bag[it] = (n.bag[it] ?? 0) + 1; emote(s, n, 'star'); }
+      return wait(n, rand(3, 6));
+    }
     case 'fest': emote(s, n, pick(['note', 'star', 'heart'])); return wait(n, rand(4, 9));
     case 'leave': return removeVisitor(s, n);
     case 'exitExp': n.state = 'away'; return;
@@ -473,7 +552,8 @@ function insideTick(s: GameState, n: Npc, dt: number) {
   if (n.goal === 'rest' || n.goal === 'sleep') {
     if (n.role === 'fighter') {
       const kind = BUILDINGS[b.type].kind;
-      const rate = (kind === 'clinic' ? 0.05 : kind === 'house' ? 0.025 : 0.012) * (n.home == null ? 0.5 : 1) * (1 + rbonus(s, 'medicine'));
+      // the herb pharmacy's remedies mend faster than an ordinary clinic
+      const rate = (kind === 'clinic' ? (b.type === 'pharmacy' ? 0.065 : 0.05) : kind === 'house' ? 0.025 : 0.012) * (n.home == null ? 0.5 : 1) * (1 + rbonus(s, 'medicine'));
       n.hp = Math.min(maxHp(s, n), n.hp + maxHp(s, n) * rate * dt);
     }
     const done = n.goal === 'rest' ? n.hp >= maxHp(s, n) * 0.95 : !isNight(s);
@@ -582,6 +662,7 @@ function killMonster(s: GameState, m: Monster, killer: Npc) {
   for (const f of parts) {
     gainNpcExp(s, f, expReward(L) * bonus);
     skill(s, f, 'instinct', 1.5);
+    if (f.school) skill(s, f, f.school, 1.5);
     f.state = 'idle'; f.kills++; f.yk = (f.yk ?? 0) + 1;
     (f.fk ??= {})[fam] = (f.fk[fam] ?? 0) + 1;
     if (f.kills === 1) bio(s, f, 'bio.firstKill', { m: '@m.' + m.type });
@@ -601,6 +682,22 @@ function killMonster(s: GameState, m: Monster, killer: Npc) {
     s.ys.bosses++;
     addFame(s, 10);
     log(s, 'log.bossDown', { t: `@boss.${m.boss}`, m: '@m.' + m.type, n: parts.length, r: reward });
+    if (m.champ) championDown(s, m);
+    if (m.boss === LEGEND_TITLE) {
+      // the legendary beast leaves its relic, the stuff of the village's own wonder
+      const relic = LEGEND[s.village]?.relic;
+      if (relic) addItem(s, relic, 3 + Math.floor(year(s) / 4));
+      s.money += 800 * L; addFame(s, 25);
+      log(s, 'ev.legendDown', { m: '@m.' + m.type, i: `@item.${relic}` });
+    }
+    if (m.type === 'nian') {
+      // driving off the Nian brings luck for the new year
+      s.money += 500 * L;
+      addItem(s, 'gem', 3); addItem(s, 'goldOre', 5);
+      addFame(s, 20);
+      tally(s, 'nian');
+      log(s, 'ev.nianDown', { v: 500 * L });
+    }
   }
   if (m.shiny) {
     if (!s.shinySeen.includes(m.type)) s.shinySeen.push(m.type);
@@ -609,7 +706,7 @@ function killMonster(s: GameState, m: Monster, killer: Npc) {
   }
   const fogLoot = s.village === 'mist' && s.weather === 'fog';
   if (fogLoot) tally(s, 'fogKills');
-  const count = Math.max(1, Math.round(dropCount(L) * mods(s).drops * (fogLoot ? 1.5 : 1) * (m.boss != null ? 10 : m.shiny ? 3 : 1) * (1 + rbonus(s, 'logistics') + petBonus(s, 'scout'))));
+  const count = Math.max(1, Math.round(dropCount(L) * mods(s).drops * (fogLoot ? 1.5 : 1) * (m.boss != null ? 10 : m.shiny ? 3 : 1) * (isBattlefield(m.x, m.y) ? 1.5 : 1) * (1 + rbonus(s, 'logistics') + petBonus(s, 'scout'))));
   const drops = MONSTERS[m.type].drops;
   for (let i = 0; i < count; i++) {
     const item = weighted(drops, (d) => d[1])![0];
@@ -659,6 +756,7 @@ const targetable = (n: Npc) =>
     (n.state === 'walk' && n.goal !== 'rest' && n.goal !== 'exitExp' && n.goal !== 'sleep'));
 
 function updateMonster(s: GameState, m: Monster, dt: number) {
+  if (m.champ) championTick(s, m, dt, (f) => downFighter(s, f, m));
   let f = npcById(s, m.target);
   if (f && !targetable(f)) { m.target = null; f = undefined; }
   if (!f) {
@@ -700,7 +798,8 @@ function updateMonster(s: GameState, m: Monster, dt: number) {
     m.arr = false;
     m.wait = rand(1, 4);
     for (let k = 0; k < 6; k++) {
-      const tx = m.x + rand(-5, 5), ty = m.y + rand(-5, 5);
+      // wander targets stay a tile inside the map edge
+      const tx = Math.max(1, Math.min(MAP - 2, m.x + rand(-5, 5))), ty = Math.max(1, Math.min(MAP - 2, m.y + rand(-5, 5)));
       if (zoneOf(tx, ty) === m.zone && segmentAvoidsVillage(m.x, m.y, tx, ty) && (impassable(Math.floor(m.x), Math.floor(m.y)) || dryLine(m.x, m.y, tx, ty))) { m.tx = tx; m.ty = ty; break; }
     }
     return;
@@ -710,7 +809,7 @@ function updateMonster(s: GameState, m: Monster, dt: number) {
   const nx = m.x + (dx / d) * sp, ny = m.y + (dy / d) * sp;
   // monsters stop at water, rock, walls and cliffs, though one that spawned in the water may wade out
   if ((impassable(Math.floor(nx), Math.floor(ny)) && !impassable(Math.floor(m.x), Math.floor(m.y))) || !canStep(Math.floor(m.x), Math.floor(m.y), Math.floor(nx), Math.floor(ny))) { m.tx = m.x; m.ty = m.y; m.arr = false; return; }
-  m.x = nx; m.y = ny;
+  m.x = Math.max(0.5, Math.min(MAP - 0.5, nx)); m.y = Math.max(0.5, Math.min(MAP - 0.5, ny));
 }
 
 export const zoneCap = (s: GameState, z: number) =>
@@ -732,6 +831,8 @@ function spawnMonster(s: GameState) {
     tx: to.x, ty: to.y, target: null, cd: 0, facing: 1, zone, wait: 0, arr: true, born: s.time,
   });
   const m = s.monsters[s.monsters.length - 1];
+  // the old battlefield breeds tougher monsters
+  if (isBattlefield(to.x, to.y)) m.lv = s.mlv[type].level + 4;
   m.hp = monsterStats(s, type, m).maxHp;
 }
 
@@ -748,7 +849,7 @@ function gatherTick(s: GameState, n: Npc, dt: number) {
   const node = s.nodes.find((o) => o.id === n.goalId);
   if (!node || sleepy(s, n)) { n.state = 'idle'; return; }
   n.timer += dt;
-  const interval = 0.6 / (1 + 0.1 * Math.sqrt(n.level - 1)) / (1 + rbonus(s, 'gathering') + petBonus(s, 'hauler'));
+  const interval = 0.6 / (1 + 0.1 * Math.sqrt(n.level - 1)) / (1 + rbonus(s, 'gathering') + petBonus(s, 'hauler')) / gatherMult(s) / boon('gather');
   if (n.timer < interval) return;
   n.timer -= interval;
   const item = NODE_ITEM[node.kind];
@@ -917,6 +1018,11 @@ function daily(s: GameState) {
   vipDaily(s);
   autoExpedition(s);
   villageDaily(s);
+  villageDailyExtras(s);
+  championsDaily(s);
+  jobsDaily(s);
+  rickshaws = hasJob(s, 'rickshaw');
+  rideVillage = s.village;
   landYields(s);
   catDaily(s);
   rivalsDaily(s);
@@ -944,7 +1050,7 @@ function monsterDrift(s: GameState) {
   for (const [k, d] of Object.entries(MONSTERS)) {
     const target = avg * (d.zone < 0 ? 0.8 : [0.25, 0.45, 0.65][d.zone]);
     const ml = s.mlv[k];
-    if (ml.level < target) ml.level += Math.max(1, Math.round((target - ml.level) * 0.08));
+    if (ml && ml.level < target) ml.level += Math.max(1, Math.round((target - ml.level) * 0.08));
   }
 }
 
@@ -979,7 +1085,10 @@ function arrivals(s: GameState) {
     log(s, 'log.arriveGatherer', { n: '@name:' + n.name });
   } else if (room && fighters.length < monsterCap(s) * 1.3 && chance(Math.min(0.5, 0.12 + att / 400))) {
     const avg = fighters.length ? fighters.reduce((a, f) => a + f.level, 0) / fighters.length : 1;
-    const n = makeNpc(s, 'fighter', SOUTH_EXIT.x, SOUTH_EXIT.y, Math.max(1, Math.round(avg * rand(0.3, 0.8))));
+    // two in five newcomers grew up in the village's own school: its favourite class and its own skill
+    const school = SCHOOL[s.village], local = !!school && chance(0.4);
+    const n = makeNpc(s, 'fighter', SOUTH_EXIT.x, SOUTH_EXIT.y, Math.max(1, Math.round(avg * rand(0.3, 0.8))), local ? school[0] : undefined);
+    if (local) n.school = school[1];
     n.money = 60 + n.level * 20;
     s.npcs.push(n);
     log(s, 'log.arriveFighter', { n: '@name:' + n.name, c: '@cls.' + n.cls });
@@ -1051,7 +1160,7 @@ function expeditionTick(s: GameState) {
     if (!e.members.length) { s.exp = null; s.expLast = s.time; return; }
     if (members().every((n) => n.state === 'away')) {
       const def = EXPEDITIONS.find((x) => x.key === e.loc)!;
-      e.state = 'away'; e.start = s.time; e.until = s.time + def.days * DAY; e.nextDay = s.time + DAY;
+      e.state = 'away'; e.start = s.time; e.until = s.time + def.days * DAY * (hasPerk(s.buildings, 'relay') ? 0.8 : 1) * (s.village === 'iron' && megaDone(s) ? 0.85 : 1); e.nextDay = s.time + DAY;
     }
     return;
   }
@@ -1086,6 +1195,7 @@ export const tally = (s: GameState, k: string, n = 1) => { (s.vstat ??= {})[k] =
 
 // what makes each village its own: ore that runs thin, ice in winter, sand that buries the streets, river trade
 function villageDaily(s: GameState) {
+  setFlood(s.weather === 'storm');
   if (s.village === 'iron') {
     const digs = s.buildings.filter((b) => b.type === 'quarry' || b.type === 'mineShaft').length;
     const before = s.vein ?? 1;
@@ -1109,18 +1219,25 @@ function villageDaily(s: GameState) {
 
 // once a month the river brings a trading boat to the maple village, and the oasis a caravan to the sun village
 function villageMonthly(s: GameState) {
+  // the money house pays interest on what the village has put by
+  if (hasPerk(s.buildings, 'interest') && s.money > 0) { const v = Math.round(Math.min(s.money * 0.005, 1500 * year(s))); s.money += v; log(s, 'log.interest', { v }); }
   // finished wonders keep the village's name on travellers' lips
   const wonders = s.buildings.filter((b) => BUILDINGS[b.type].wonder && finished(b)).length;
   if (wonders) addFame(s, 3 * wonders);
+  // a memorial arch at the village gate spreads its good name
+  const arches = s.buildings.filter((b) => b.type === 'paifang').length;
+  if (arches) addFame(s, arches);
   if (s.village === 'maple' && s.terrain?.water.length) {
     s.boatUntil = s.time + DAY;
-    const n = 2 + (s.buildings.some((b) => b.type === 'riverPort') ? 2 : 0) + Math.floor(year(s) / 4);
+    const n = 2 + (s.buildings.some((b) => b.type === 'riverPort') ? 2 : 0) + Math.floor(year(s) / 4) + (hasLocal(s) ? 1 : 0);
     for (let k = 0; k < n; k++) addItem(s, pick(['pearl', 'amber', 'silk', 'shell', 'honey', 'oldCoin']), 1);
     tally(s, 'boats');
     log(s, 'log.riverBoat', { n });
   }
+  // finished great works pay their way: sightseers crossing the maple village's great bridge
+  if (megaDone(s) && s.village === 'maple') { const v = 400 * year(s); s.money += v; log(s, 'log.megaIncome', { p: '@mega.bridge', v }); }
   if (s.village === 'sun' && s.buildings.some((b) => b.type === 'caravanserai')) {
-    const v = 250 * year(s);
+    const v = Math.round(250 * year(s) * (hasLocal(s) ? 1.2 : 1));
     s.money += v;
     log(s, 'log.oasisCaravan', { v });
   }
@@ -1128,16 +1245,29 @@ function villageMonthly(s: GameState) {
 
 // terrain workshops bring in their goods each morning, a little more at higher levels
 function landYields(s: GameState) {
+  // workshops turn their raw stock into the village's product, a bigger batch at higher levels
   for (const b of s.buildings) {
+    const c = BUILDINGS[b.type].convert;
+    if (!c || !finished(b) || (b.ready != null && b.ready > s.time)) continue;
+    const [[inp, need], [out, make]] = c, batches = Math.min(1 + Math.floor((b.level - 1) / 3), Math.floor((s.items[inp] ?? 0) / need));
+    if (batches > 0) { s.items[inp] -= need * batches; addItem(s, out, make * batches); }
+  }
+  // a drought withers the fields and orchards
+  const drought = s.disaster?.k === 'drought' && !s.disaster.saved && s.disaster.until > s.time;
+  for (const b of s.buildings) {
+    if (drought && (b.type === 'farmField' || b.type === 'herbGarden')) continue;
     const y = BUILDINGS[b.type].yield;
     if (!y) continue;
-    let k = 1 + 0.15 * (b.level - 1);
+    let k = (1 + 0.15 * (b.level - 1)) * gatherMult(s) * boon('gather');
     if (b.type === 'quarry' || b.type === 'mineShaft') k *= s.vein ?? 1;
     if (b.type === 'fishingDock' && isFrozen()) { k *= 2; tally(s, 'iceFish'); }
+    // fields beside a water wheel or a stone mill bring in more
+    if (b.type === 'farmField' && s.buildings.some((o) => (o.type === 'waterMill' || o.type === 'stoneMill') && Math.max(Math.abs(o.x - b.x), Math.abs(o.y - b.y)) <= 6)) k *= 1.4;
     for (const [item, n] of y) {
       const amt = n * k, c = Math.floor(amt) + (chance(amt - Math.floor(amt)) ? 1 : 0);
       if (c > 0) addItem(s, item, c);
     }
+    if (b.type === 'lumberCamp' && (culture.lang === 'zh' || culture.lang === 'ja')) addItem(s, 'bamboo', Math.round(3 * k));
   }
 }
 
@@ -1180,9 +1310,9 @@ function expeditionDay(s: GameState, e: Expedition, ms: Npc[]) {
     if (won) {
       e.wins++;
       const frac = Math.min(0.8, (ttkM / ttkP) * 0.5);
-      for (const n of ms) { n.hp = Math.max(1, n.hp - maxHp(s, n) * frac * rand(0.5, 1)); gainNpcExp(s, n, expReward(mst.level) * g); }
+      for (const n of ms) { n.hp = Math.max(1, n.hp - maxHp(s, n) * frac * rand(0.5, 1)); gainNpcExp(s, n, expReward(mst.level) * g * (hasPerk(s.buildings, 'dojo') ? 1.2 : 1)); }
       gainMonsterExp(s, type, expReward(avgL) * 0.05 * g);
-      const count = Math.max(1, Math.round(dropCount(mst.level) * g * mods(s).drops * (1 + 0.15 * depth)));
+      const count = Math.max(1, Math.round(dropCount(mst.level) * g * mods(s).drops * (1 + 0.15 * depth) * (hasPerk(s.buildings, 'escort') ? 1.25 : 1)));
       for (let i = 0; i < count; i++) {
         const item = weighted(MONSTERS[type].drops, (d) => d[1])![0];
         e.loot[item] = (e.loot[item] ?? 0) + 1;

@@ -1,4 +1,4 @@
-import { MAP, V_BASE_MAX, V_BASE_MIN, SOUTH_EXIT, EAST_EXIT } from './constants';
+import { DAYS_PER_YEAR, MAP, V_BASE_MAX, V_BASE_MIN, SOUTH_EXIT, EAST_EXIT } from './constants';
 import { BUILDINGS, villageDef } from './data';
 import type { Building, GameState, P, Terrain } from './types';
 
@@ -10,10 +10,19 @@ export function syncBounds(s: GameState) {
   grid = null;
   ter.fill(0);
   const tr = s.terrain;
-  if (tr) for (const [k, list] of [[WATER, tr.water], [ROCK, tr.rock], [BOG, tr.bog], [THICKET, tr.thicket], [VENT, tr.vent ?? []], [CAVE, tr.cave ?? []]] as const) for (const i of list) ter[i] = k;
+  if (tr) for (const [k, list] of [[WATER, tr.water], [ROCK, tr.rock], [BOG, tr.bog], [THICKET, tr.thicket], [VENT, tr.vent ?? []], [CAVE, tr.cave ?? []], [STREAM, tr.stream ?? []], [CANYON, tr.canyon ?? []], [SPRING, tr.spring ?? []], [MANGROVE, tr.mangrove ?? []], [PILLAR, tr.pillar ?? []], [GLACIER, tr.glacier ?? []], [CREVASSE, tr.crevasse ?? []]] as const) for (const i of list) ter[i] = k;
   flowerSet = new Set(tr?.flowers ?? []);
-  if (heightKey !== s.village) { heightKey = s.village; makeHeights(); }
+  seaSet = new Set(tr?.sea ?? []);
+  battleSet = new Set(tr?.battle ?? []);
+  beachSet = new Set(tr?.beach ?? []);
+  lavaSet = new Set(villageDef(s.village).terrain.volcano ? lavaTiles(Math.floor(s.day / DAYS_PER_YEAR)) : []);
+  for (const i of lavaSet) if (!ter[i] || ter[i] === THICKET) ter[i] = LAVA;
+  // the volcano's slopes are worked out again each year, since the lava takes a new course
+  const hy = villageDef(s.village).terrain.volcano ? Math.floor(s.day / DAYS_PER_YEAR) : 0;
+  if (heightKey !== s.village || heightYear !== hy) { heightKey = s.village; heightYear = hy; makeHeights(); }
+  terrainState.version++;
   syncRoads(s);
+  findLandmarks();
 }
 
 // ---------- elevation ----------
@@ -23,7 +32,7 @@ export function syncBounds(s: GameState) {
 const FLAT_MIN = 15, FLAT_MAX = 48;
 const hgt = new Int8Array(MAP * MAP);
 const rampDir = new Int8Array(MAP * MAP);
-let heightKey = '';
+let heightKey = '', heightYear = 0;
 export const RAMP_DIRS: [number, number][] = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 export const halfLevel = (x: number, y: number) => (inMap(x, y) ? hgt[y * MAP + x] : 0);
 export const rampAt = (x: number, y: number) => (inMap(x, y) && hgt[y * MAP + x] & 1 ? rampDir[y * MAP + x] : -1);
@@ -59,7 +68,7 @@ function makeHeights() {
     const flat = (x >= FLAT_MIN && x <= FLAT_MAX && y >= FLAT_MIN && y <= FLAT_MAX) || x === SOUTH_EXIT.x || y === EAST_EXIT.y;
     if (flat) fixed[i] = 1;
   }
-  for (let i = 0; i < MAP * MAP; i++) if (ter[i] === WATER) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+  for (let i = 0; i < MAP * MAP; i++) if (ter[i] === WATER || ter[i] === SPRING) for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
     const x = (i % MAP) + dx, y = ((i / MAP) | 0) + dy;
     if (inMap(x, y)) fixed[y * MAP + x] = 1;
   }
@@ -77,7 +86,10 @@ function makeHeights() {
     const front = x + y > 66 && Math.abs(x - y) < 34;
     L = front ? Math.min(0, -Math.abs(L)) : Math.max(0, L);
     const cap = Math.floor(dist[i] / 3);
-    lvl[i] = Math.max(-Math.min(2, cap), Math.min(Math.min(2, cap), L));
+    // the far back corner rises into a peak three levels high
+    const peak = x < 11 && y < 11 ? 3 : 2;
+    if (peak === 3 && !front) L = Math.max(L, 3 - Math.floor(Math.hypot(x - 3, y - 3) / 3));
+    lvl[i] = Math.max(-Math.min(2, cap), Math.min(Math.min(peak, cap), L));
   }
   // neighbours never differ by more than a level
   for (let it = 0; it < 4; it++) for (let i = 0; i < MAP * MAP; i++) {
@@ -118,11 +130,23 @@ function makeHeights() {
       }
     }
   }
+  // travertine steps: each 2x2 pool a level below the last, starting two levels up
+  const def0 = villageDef(heightKey).terrain;
+  (def0.terraces ?? []).forEach(([x, y], k) => { const L = 2 - k; for (let b = 0; b < 2; b++) for (let a = 0; a < 2; a++) if (inMap(x + a, y + b)) lvl[(y + b) * MAP + x + a] = L; });
+  if (def0.terraces) for (let it = 0; it < 3; it++) for (let i = 0; i < MAP * MAP; i++) {
+    if (ter[i] === SPRING) continue;
+    const x = i % MAP, y = (i / MAP) | 0;
+    for (const [dx, dy] of DIRS) { const nx = x + dx, ny = y + dy; if (!inMap(nx, ny)) continue; const o = lvl[ny * MAP + nx]; if (lvl[i] > o + 1) lvl[i] = o + 1; if (lvl[i] < o - 1) lvl[i] = o - 1; }
+  }
+  // the glacier stands a level above the land in front of it, ending in an ice cliff
+  for (let i = 0; i < MAP * MAP; i++) if (ter[i] === GLACIER || ter[i] === CREVASSE) lvl[i] = Math.max(lvl[i], 1);
+  // the gorge drops three levels below the land around it; the road across it stays level on its bridge
+  for (let i = 0; i < MAP * MAP; i++) if (ter[i] === CANYON && i % MAP !== SOUTH_EXIT.x && ((i / MAP) | 0) !== EAST_EXIT.y) lvl[i] = -3;
   for (let i = 0; i < MAP * MAP; i++) { hgt[i] = lvl[i] * 2; rampDir[i] = -1; }
   // ramps: a low tile at the foot of a cliff turns into a slope, every few tiles along each cliff
   for (let y = 1; y < MAP - 1; y++) for (let x = 1; x < MAP - 1; x++) {
     const i = y * MAP + x, L = lvl[i];
-    if (ter[i] === WATER || ter[i] === ROCK) continue;
+    if (ter[i] === WATER || ter[i] === ROCK || ter[i] === CANYON || ter[i] === LAVA || ter[i] === SPRING || ter[i] === GLACIER || ter[i] === CREVASSE || ter[i] === PILLAR) continue;
     for (let d = 0; d < 4; d++) {
       const [dx, dy] = RAMP_DIRS[d];
       if (lvl[(y + dy) * MAP + x + dx] !== L + 1 || lvl[(y - dy) * MAP + x - dx] !== L) continue;
@@ -136,6 +160,28 @@ function makeHeights() {
   }
 }
 
+// ---------- landmarks ----------
+// a hunter's cabin and a ruined watchtower on the highest open ground of the wilds, well apart
+export const landmarks: { x: number; y: number; kind: 'cabin' | 'tower' }[] = [];
+function findLandmarks() {
+  landmarks.length = 0;
+  const spots: { x: number; y: number; h: number }[] = [];
+  for (let y = 2; y < MAP - 3; y++) for (let x = 2; x < MAP - 3; x++) {
+    if (villageDist(x, y) < 9) continue;
+    let ok = true; const h0 = hgt[y * MAP + x];
+    if (h0 < 2 || h0 & 1) continue;
+    for (let b = 0; b < 2 && ok; b++) for (let a = 0; a < 2 && ok; a++) { const i = (y + b) * MAP + x + a; if (ter[i] || hgt[i] !== h0 || roads[i]) ok = false; }
+    if (ok) spots.push({ x, y, h: h0 + ((x * 7 + y * 13) % 5) / 10 });
+  }
+  spots.sort((a, b) => b.h - a.h);
+  for (const p of spots) {
+    if (landmarks.some((l) => Math.hypot(l.x - p.x, l.y - p.y) < 20)) continue;
+    landmarks.push({ x: p.x, y: p.y, kind: landmarks.length ? 'tower' : 'cabin' });
+    if (landmarks.length >= 2) break;
+  }
+}
+export const onLandmark = (x: number, y: number) => landmarks.some((l) => x >= l.x && x < l.x + 2 && y >= l.y && y < l.y + 2);
+
 // ---------- walls ----------
 // a wall rings the village one tile outside its bounds; gates stand where roads leave and at the middle of each side
 export const onRing = (x: number, y: number) => villageDist(x, y) === 1 && !(x < VB.min - 1 || x > VB.max + 1 || y < VB.min - 1 || y > VB.max + 1);
@@ -145,18 +191,66 @@ export const isWall = (x: number, y: number) => onRing(x, y) && !isGate(x, y) &&
 // ---------- terrain ----------
 // water and rock block walking; nothing can be built on any terrain. Roads may cross bog and thicket
 // (boardwalks, cleared trails) and narrow water (bridges); a lake is too wide to span.
-export const WATER = 1, ROCK = 2, BOG = 3, THICKET = 4, VENT = 5, CAVE = 6;
-let flowerSet = new Set<number>();
+export const WATER = 1, ROCK = 2, BOG = 3, THICKET = 4, VENT = 5, CAVE = 6, STREAM = 7, LAVA = 8, CANYON = 9, SPRING = 10, MANGROVE = 11, PILLAR = 12, GLACIER = 13, CREVASSE = 14;
+let battleSet = new Set<number>(), flowerSet = new Set<number>(), seaSet = new Set<number>(), beachSet = new Set<number>(), lavaSet = new Set<number>();
 export const isFlowers = (x: number, y: number) => flowerSet.has(y * MAP + x);
+export const isSea = (x: number, y: number) => seaSet.has(y * MAP + x);
+export const isBattlefield = (x: number, y: number) => battleSet.has(Math.floor(y) * MAP + Math.floor(x));
+export const isBeach = (x: number, y: number) => beachSet.has(y * MAP + x);
+export const isLava = (x: number, y: number) => inMap(x, y) && lavaSet.has(y * MAP + x) && ter[y * MAP + x] === LAVA;
+export const lavaList = () => [...lavaSet].filter((i) => ter[i] === LAVA);
+// bumped whenever terrain changes shape (the lava moving, land cleared), so baked ground redraws
+export const terrainState = { version: 0 };
+
+// lava wanders down from the crater a little differently every year, two tongues toward the front,
+// stopping well short of the village
+export function lavaTiles(year: number): number[] {
+  const out = new Set<number>();
+  const rnd = (a: number, b: number) => { const v = Math.sin(year * 51.7 + a * 12.9898 + b * 78.233) * 43758.5453; return v - Math.floor(v); };
+  for (let f = 0; f < 2; f++) {
+    // each tongue runs a few tiles one way, then a few the other, two to three tiles across
+    let x = 4 + f * 2, y = 5 - f, dir = f;
+    for (let k = 0; k < 18; k++) {
+      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) if (dx + dy < 2 || rnd(k, f + 3) < 0.5) out.add((y + dy) * MAP + x + dx);
+      if (rnd(f, k) < 0.3) dir = 1 - dir;
+      if (dir === 0) x++; else y++;
+      if (x + y > 26 || villageDist(x, y) < 8) break;
+    }
+  }
+  // smooth the outline: fill notches between lava on three sides, drop lone spurs
+  for (let pass = 0; pass < 2; pass++) {
+    const add: number[] = [], drop: number[] = [];
+    for (let y = 1; y < 30; y++) for (let x = 1; x < 30; x++) {
+      const i = y * MAP + x, n = [[1, 0], [-1, 0], [0, 1], [0, -1]].filter(([dx, dy]) => out.has((y + dy) * MAP + x + dx)).length;
+      if (!out.has(i) && n >= 3 && villageDist(x, y) >= 8) add.push(i);
+      if (out.has(i) && n <= 1) drop.push(i);
+    }
+    for (const i of add) out.add(i);
+    for (const i of drop) out.delete(i);
+  }
+  return [...out].filter((i) => inMap(i % MAP, (i / MAP) | 0));
+}
 const ter = new Uint8Array(MAP * MAP);
 export const terrainAt = (x: number, y: number) => (inMap(x, y) ? ter[y * MAP + x] : 0);
 export const isWater = (x: number, y: number) => terrainAt(x, y) === WATER;
 export const isBridge = (x: number, y: number) => isWater(x, y) && isRoad(x, y);
-export const slowAt = (x: number, y: number) => { const k = terrainAt(x, y); return (k === BOG || k === THICKET) && !isRoad(x, y); };
-const solidAt = (k: number) => k === ROCK || k === VENT || k === CAVE;
+export const slowAt = (x: number, y: number) => { const k = terrainAt(x, y); return ((k === BOG || k === THICKET || k === STREAM || k === MANGROVE) && !isRoad(x, y)) || (flooded && floodTiles.has(y * MAP + x)); };
+// a hollow where a road crosses the gorge on ropes
+export const isRopeBridge = (x: number, y: number) => terrainAt(x, y) === CANYON && isRoad(x, y);
+// after a storm the river banks lie under shallow water for a day
+let flooded = false;
+const floodTiles = new Set<number>();
+export const isFlooded = (x: number, y: number) => flooded && floodTiles.has(y * MAP + x);
+export function setFlood(on: boolean) {
+  if (on === flooded) return;
+  flooded = on; floodTiles.clear();
+  if (on) for (let i = 0; i < MAP * MAP; i++) if (ter[i] === 0) { const x = i % MAP, y = (i / MAP) | 0; if ([[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dy]) => terrainAt(x + dx, y + dy) === WATER) && !inVillage(x, y)) floodTiles.add(i); }
+  roadState.version++;
+}
+const solidAt = (k: number) => k === ROCK || k === VENT || k === CAVE || k === LAVA || k === SPRING || k === PILLAR || k === GLACIER || k === CREVASSE;
 export const BRIDGE_MAX = 4;
-const NEAR_KIND: Record<string, number> = { water: WATER, rock: ROCK, bog: BOG, thicket: THICKET, vent: VENT, cave: CAVE };
-export const impassable = (x: number, y: number) => { const k = terrainAt(x, y); return (k === WATER && !isRoad(x, y) && !frozen) || solidAt(k) || isWall(x, y); };
+const NEAR_KIND: Record<string, number> = { water: WATER, stream: STREAM, rock: ROCK, bog: BOG, thicket: THICKET, vent: VENT, cave: CAVE };
+export const impassable = (x: number, y: number) => { const k = terrainAt(x, y); return (k === WATER && !isRoad(x, y) && (!frozen || seaSet.has(y * MAP + x))) || (k === CANYON && !isRoad(x, y)) || solidAt(k) || isWall(x, y); };
 // winter ice on the frost village's water can be walked on
 let frozen = false;
 export const isFrozen = () => frozen;
@@ -200,6 +294,24 @@ export function makeTerrain(village: string): Terrain {
     }
   };
   (d.lakes ?? []).forEach(([x, y, rx, ry], k) => blob(out.water, x, y, rx, ry, 10 + k));
+  // the sea fills the back edge with a ragged coast, sand along it, and a few reefs offshore
+  const sea: number[] = [], beach: number[] = [];
+  if (d.sea) for (let x = 0; x < MAP; x++) {
+    const fade = Math.min(1, Math.max(0, (x - 12) / 6));
+    const depth = Math.round((d.sea + 1.4 * Math.sin(x * 0.31) + 0.8 * Math.sin(x * 0.83 + 1)) * fade);
+    for (let y = 0; y < depth; y++) { out.water.add(y * MAP + x); sea.push(y * MAP + x); }
+    for (let y = depth; y < depth + 2 && depth > 0; y++) beach.push(y * MAP + x);
+  }
+  const reefs = sea.filter((i) => { const x = i % MAP, y = (i / MAP) | 0; return y <= 1 && x > 20 && noise(x, y, 70) > 0.93; });
+  for (const i of reefs) { out.water.delete(i); out.rock.add(i); }
+  const canyon: number[] = [];
+  if (d.canyon) for (let s2 = 0; s2 + 1 < d.canyon.length; s2++) {
+    const [ax, ay] = d.canyon[s2], [bx, by] = d.canyon[s2 + 1], n = Math.max(Math.abs(bx - ax), Math.abs(by - ay));
+    for (let k = 0; k <= n; k++) {
+      const x = Math.round(ax + ((bx - ax) * k) / n), y = Math.round(ay + ((by - ay) * k) / n);
+      for (const dx of [0, 1, 2]) if (inMap(x + dx, y) && !canyon.includes(y * MAP + x + dx)) canyon.push(y * MAP + x + dx);
+    }
+  }
   (d.rocks ?? []).forEach(([x, y, rr], k) => blob(out.rock, x, y, rr, rr, 20 + k));
   (d.bog ?? []).forEach(([x, y, rr], k) => blob(out.bog, x, y, rr, rr * 0.8, 30 + k));
   (d.thicket ?? []).forEach(([x, y, rr], k) => blob(out.thicket, x, y, rr, rr * 0.85, 40 + k));
@@ -220,14 +332,52 @@ export function makeTerrain(village: string): Terrain {
   };
   const onBase = (i: number) => i % MAP === SOUTH_EXIT.x || ((i / MAP) | 0) === EAST_EXIT.y;
   const water = [...out.water].filter(keep);
-  const taken = new Set(water);
+  const taken = new Set([...water, ...canyon]);
   const spots = (list: [number, number][] | undefined) => (list ?? []).map(([x, y]) => y * MAP + x).filter((i) => keep(i) && !onBase(i) && !taken.has(i) && (taken.add(i), true));
   const vent = spots(d.vents), cave = spots(d.caves);
+  // hot spring pools beside the vents
+  const springSet = new Set<number>();
+  (d.springs ?? []).forEach(([x, y, rr], k) => blob(springSet, x, y, rr, rr * 0.9, 70 + k));
+  // travertine terraces: 2x2 pools down a slope, each step a level below the one before
+  (d.terraces ?? []).forEach(([x, y]) => { for (let b = 0; b < 2; b++) for (let a = 0; a < 2; a++) springSet.add((y + b) * MAP + x + a); });
+  const spring = [...springSet].filter((i) => keep(i) && !onBase(i) && !taken.has(i) && (taken.add(i), true));
+  const claim = (set: Set<number>, land = false) => [...set].filter((i) => keep(i) && !onBase(i) && !taken.has(i) && !(land && out.water.has(i)) && (taken.add(i), true));
+  const mg = new Set<number>(), pl = new Set<number>();
+  (d.mangroves ?? []).forEach(([x, y, rr], k) => blob(mg, x, y, rr * 1.3, rr * 0.8, 80 + k));
+  // the stone forest leaves winding lanes between its pillars
+  (d.pillars ?? []).forEach(([x, y, rr], k) => { const t = new Set<number>(); blob(t, x, y, rr, rr, 90 + k); for (const i of t) if (noise(i % MAP, (i / MAP) | 0, 91 + k) > 0.38) pl.add(i); });
+  const mangrove = claim(mg, true), pillar = claim(pl);
+  // the glacier along the back edge, its crevasses running down it
+  const gl = new Set<number>(), cv = new Set<number>();
+  if (d.glacier) for (let x = 14; x < MAP; x++) {
+    const depth = Math.round(d.glacier + 1.2 * Math.sin(x * 0.27) + 0.7 * Math.sin(x * 0.71 + 2));
+    for (let y = 0; y < depth; y++) (x % 9 === 4 && y < depth - 1 ? cv : gl).add(y * MAP + x);
+  }
+  const glacier = claim(gl), crevasse = claim(cv);
+  for (const [x, y, rr] of d.sinkholes ?? []) for (let yy = Math.floor(y - rr); yy <= y + rr; yy++) for (let xx = Math.floor(x - rr); xx <= x + rr; xx++) if (Math.hypot(xx + 0.5 - x, yy + 0.5 - y) < rr && inMap(xx, yy) && !taken.has(yy * MAP + xx)) { taken.add(yy * MAP + xx); canyon.push(yy * MAP + xx); }
+  const battle: number[] = [];
+  if (d.battlefield) { const [x, y, rr] = d.battlefield; for (let yy = Math.floor(y - rr); yy <= y + rr; yy++) for (let xx = Math.floor(x - rr); xx <= x + rr; xx++) if (inMap(xx, yy) && Math.hypot(xx + 0.5 - x, yy + 0.5 - y) < rr + noise(xx, yy, 95) * 0.8) battle.push(yy * MAP + xx); }
   const rest = (set: Set<number>, base: boolean) => [...set].filter((i) => keep(i) && !taken.has(i) && (base || !onBase(i)) && (taken.add(i), true));
+  // streams: one tile wide, following straight runs between the given points
+  const stream: number[] = [];
+  for (const line of d.streams ?? []) for (let s = 0; s + 1 < line.length; s++) {
+    const [ax, ay] = line[s], [bx, by] = line[s + 1], n = Math.max(Math.abs(bx - ax), Math.abs(by - ay));
+    // stepping one axis at a time keeps the stream joined edge to edge, never just at a corner
+    let px = ax, py = ay;
+    const put1 = (x: number, y: number) => { const i = y * MAP + x; if (inMap(x, y) && keep(i) && !taken.has(i)) { taken.add(i); stream.push(i); } };
+    put1(px, py);
+    for (let k = 1; k <= n; k++) {
+      const x = Math.round(ax + ((bx - ax) * k) / n), y = Math.round(ay + ((by - ay) * k) / n);
+      if (x !== px && y !== py) put1(x, py);
+      put1(x, y); px = x; py = y;
+    }
+  }
+  // the larger lakes keep a little island at their heart
+  for (const [cx, cy, rx] of d.lakes ?? []) if (rx >= 3.5) { const i = Math.round(cy) * MAP + Math.round(cx); const w = water.indexOf(i); if (w >= 0) water.splice(w, 1); }
   const fl = new Set<number>();
   (d.flowers ?? []).forEach(([x, y, rr], k) => blob(fl, x, y, rr, rr * 0.8, 60 + k));
-  const terr = { water, rock: rest(out.rock, false), bog: rest(out.bog, true), thicket: rest(out.thicket, true), vent, cave };
-  return { ...terr, flowers: [...fl].filter((i) => !taken.has(i)) };
+  const terr = { water, rock: rest(out.rock, false), bog: rest(out.bog, true), thicket: rest(out.thicket, true), vent, cave, stream };
+  return { ...terr, flowers: [...fl].filter((i) => !taken.has(i)), sea, beach: beach.filter((i) => !taken.has(i)), canyon, spring, mangrove, pillar, glacier, crevasse, battle };
 }
 
 // starting roads may only cross water between an exit and the guild; the stub beyond the river is dropped
@@ -311,7 +461,7 @@ function getGrid(s: GameState): Uint8Array {
     const n = bsize(b);
     for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) grid[(b.y + j) * MAP + b.x + i] = 1;
   }
-  for (let i = 0; i < MAP * MAP; i++) if ((ter[i] === WATER && !roads[i] && !frozen) || solidAt(ter[i]) || isWall(i % MAP, (i / MAP) | 0)) grid[i] = 1;
+  for (let i = 0; i < MAP * MAP; i++) if ((ter[i] === WATER && !roads[i] && (!frozen || seaSet.has(i))) || (ter[i] === CANYON && !roads[i]) || solidAt(ter[i]) || isWall(i % MAP, (i / MAP) | 0) || onLandmark(i % MAP, (i / MAP) | 0)) grid[i] = 1;
   return grid;
 }
 
@@ -405,7 +555,8 @@ export interface Placement { rot: number; door: P | null }
 function touches(x: number, y: number, n: number, k: number) {
   for (let j = -1; j <= n; j++) for (let i = -1; i <= n; i++) {
     if (i >= 0 && j >= 0 && i < n && j < n) continue;
-    if (terrainAt(x + i, y + j) === k) return true;
+    const t2 = terrainAt(x + i, y + j);
+    if (t2 === k || (k === WATER && t2 === STREAM)) return true;
   }
   return false;
 }
@@ -455,7 +606,7 @@ export function randomVillageTile(s: GameState): P {
 export function randomZoneTile(zone: number): P {
   for (let k = 0; k < 60; k++) {
     const x = Math.floor(Math.random() * MAP), y = Math.floor(Math.random() * MAP);
-    if (zoneOf(x, y) === zone && !isRoad(x, y) && terrainAt(x, y) !== WATER && terrainAt(x, y) !== ROCK && villageDist(x, y) >= 2) return { x, y };
+    if (zoneOf(x, y) === zone && !isRoad(x, y) && !impassable(x, y) && villageDist(x, y) >= 2) return { x, y };
   }
   return { x: 2, y: 2 };
 }
@@ -481,8 +632,13 @@ export function segmentAvoidsVillage(ax: number, ay: number, bx: number, by: num
 
 // a point on the map's rim, and a spot in the given zone along the way from there toward the village
 export function edgeEntry(zone: number): { from: P; to: P } {
-  const t = Math.random() * (MAP - 1), side = Math.floor(Math.random() * 4);
-  const from = side === 0 ? { x: t, y: 0.5 } : side === 1 ? { x: MAP - 1.5, y: t } : side === 2 ? { x: t, y: MAP - 1.5 } : { x: 0.5, y: t };
+  let from = { x: 0.5, y: 0.5 };
+  // monsters walk in from the land's rim, never out of the sea or a gorge
+  for (let k = 0; k < 12; k++) {
+    const t = Math.random() * (MAP - 1), side = Math.floor(Math.random() * 4);
+    from = side === 0 ? { x: t, y: 0.5 } : side === 1 ? { x: MAP - 1.5, y: t } : side === 2 ? { x: t, y: MAP - 1.5 } : { x: 0.5, y: t };
+    if (!impassable(Math.floor(from.x), Math.floor(from.y))) break;
+  }
   const cx = (VB.min + VB.max + 1) / 2, cy = cx;
   const hits: P[] = [];
   for (let k = 0; k <= 60; k++) {

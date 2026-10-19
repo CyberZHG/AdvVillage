@@ -1,6 +1,7 @@
 import type { GameState } from '../game/types';
 import { culture } from '../game/data';
-import { festival, season } from '../game/events';
+import { festival, hasEffect, observance, season, solarTerm } from '../game/events';
+import { villageFest } from '../game/village';
 
 // screen-space touches: regional wildlife, the festival moon, fog, lightning and the warm light of dawn and dusk
 const h = (n: number) => { const x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); };
@@ -52,6 +53,44 @@ export function drawFlavor(ctx: CanvasRenderingContext2D, s: GameState, w: numbe
       ctx.fillStyle = (x * 3 + y * 5) % 13 === 0 || (Math.hypot(x + 4, y - 3) < 3) ? '#e8d8a0' : '#fff4c8';
       ctx.fillRect(cx + x, cy + y, 1, 1);
     }
+  }
+  const obs = observance(s), term = solarTerm(s);
+  // Lantern Festival: sky lanterns drifting up through the night
+  if (obs === 'yuanxiao' && night) for (let i = 0; i < 14; i++) {
+    const p = (time * 0.04 + h(i)) % 1, x = Math.round(h(i + 3) * w + Math.sin(time * 0.5 + i) * 6), y = Math.round(hgt * (1 - p));
+    ctx.fillStyle = 'rgba(255,170,70,0.35)'; ctx.fillRect(x - 2, y - 2, 6, 7);
+    ctx.fillStyle = '#ffb84a'; ctx.fillRect(x - 1, y, 3, 4); ctx.fillStyle = '#ffe8a0'; ctx.fillRect(x, y + 1, 1, 2);
+  }
+  // Qixi: the river of stars with a bridge of magpies across it
+  if (obs === 'qixi' && night) {
+    for (let i = 0; i < 90; i++) { const tt = h(i); const x = Math.round(tt * w), y = Math.round(hgt * 0.1 + tt * hgt * 0.25 + (h(i + 7) - 0.5) * 18); ctx.fillStyle = Math.sin(time * 3 + i) > 0 ? '#e8eeff' : '#a8b8f0'; ctx.fillRect(x, y, 1, 1); }
+    for (let k = 0; k < 9; k++) { const x = Math.round(w * 0.42 + k * 5), y = Math.round(hgt * 0.1 + 0.46 * hgt * 0.25 - Math.sin((k / 8) * Math.PI) * 8), flap = Math.floor(time * 6 + k) % 2; ctx.fillStyle = '#1e2030'; ctx.fillRect(x, y, 2, 1); ctx.fillRect(x - 1, y - flap, 1, 1); ctx.fillRect(x + 2, y - flap, 1, 1); }
+  }
+  // Frost Descent: the morning ground is rimed white
+  if (term === 17 && tod < 0.3) { ctx.fillStyle = `rgba(235,242,250,${(0.18 * (1 - tod / 0.3)).toFixed(3)})`; ctx.fillRect(0, 0, w, hgt); }
+  // first sunrise of the Japanese new year glows a little warmer
+  if (lang === 'ja' && festival(s) === 'lantern' && tod > 0.04 && tod < 0.14) { ctx.fillStyle = `rgba(255,190,110,${(0.1 * (1 - Math.abs(tod - 0.09) / 0.05)).toFixed(3)})`; ctx.fillRect(0, 0, w, hgt); }
+  void hasEffect;
+  // each village's sky has its own temper
+  const vil = s.village, clear = s.weather === 'clear';
+  if (vil === 'maple' && se === 0 && day && clear) for (let i = 0; i < (w * hgt) / 6000; i++) {
+    const x = ((h(i) * w + time * 12) % w), y = ((h(i + 4) * hgt + time * 9) % hgt); ctx.fillStyle = i % 2 ? '#ffc8dc' : '#fff0f4'; ctx.fillRect(Math.round(x), Math.round(y), 2, 1);
+  }
+  if (vil === 'mist' && tod > 0.6 && tod < 0.78 && s.weather !== 'fog') { ctx.fillStyle = `rgba(220,226,232,${(0.18 * Math.min(1, (tod - 0.6) / 0.08)).toFixed(3)})`; ctx.fillRect(0, 0, w, hgt); }
+  // the aurora; in winter it fills half the sky in shifting curtains
+  const auroraNight = vil === 'frost' && se === 3;
+  if (vil === 'frost' && night && clear) for (let b = 0; b < (auroraNight ? 5 : 3); b++) for (let x = 0; x < w; x += 2) {
+    const y = Math.round(hgt * (0.06 + b * 0.05) + Math.sin(x * 0.02 + time * 0.4 + b) * 8 + Math.sin(x * 0.007 - time * 0.2) * 10);
+    const a = (auroraNight ? 0.28 : 0.2) * (0.6 + 0.4 * Math.sin(x * 0.03 + time * 1.3 + b));
+    ctx.fillStyle = b % 3 === 1 ? `rgba(160,110,220,${(a * 0.9).toFixed(3)})` : `rgba(110,240,170,${a.toFixed(3)})`; ctx.fillRect(x, y, 2, 10 + b * 3 + (auroraNight ? 6 : 0));
+  }
+  if (vil === 'sun' && day && clear && tod > 0.25 && tod < 0.6) for (let k = 0; k < 5; k++) { const y = Math.round((k * 131 + time * 6) % hgt); ctx.fillStyle = 'rgba(255,230,180,0.05)'; ctx.fillRect(Math.round(Math.sin(time * 2 + k) * 2), y, w, 2); }
+  if ((vil === 'sun' || vil === 'frost') && night && clear) for (let i = 0; i < 40; i++) { if (Math.sin(time * 2 + i * 1.7) < -0.3) continue; ctx.fillStyle = '#f4f4ff'; ctx.fillRect(Math.round(h(i + 50) * w), Math.round(h(i + 90) * hgt * 0.35), 1, 1); }
+  // the marsh village's firefly night, whatever the language
+  if (villageFest(s) === 'fireflies' && night) for (let i = 0; i < (w * hgt) / 3000; i++) {
+    if (Math.sin(time * 2.3 + i * 1.7) < 0.3) continue;
+    const x = Math.round(h(i) * w + Math.sin(time * 0.6 + i) * 10), y = Math.round(hgt * (0.3 + h(i + 9) * 0.65));
+    ctx.fillStyle = 'rgba(220,255,120,0.35)'; ctx.fillRect(x - 1, y - 1, 3, 3); ctx.fillStyle = '#efffa0'; ctx.fillRect(x, y, 1, 1);
   }
   // warm light at sunrise and sunset
   const warm = tod > 0.045 && tod < 0.1 ? 1 - Math.abs(tod - 0.0725) / 0.0275 : tod > 0.67 && tod < 0.74 ? 1 - Math.abs(tod - 0.705) / 0.035 : 0;

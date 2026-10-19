@@ -1,5 +1,5 @@
-import { DAYS_PER_YEAR, HOUSE_CAP, PROMOTE_LEVEL, SOUTH_EXIT } from './constants';
-import { bio, bld, fx, housed, log, makeNpc, note, npcById } from './state';
+import { DAYS_PER_YEAR, PROMOTE_LEVEL, SOUTH_EXIT } from './constants';
+import { bio, bld, fx, housed, log, makeNpc, note, npcById, bedsOf } from './state';
 import { chance } from './util';
 import type { GameState, Npc } from './types';
 
@@ -84,7 +84,7 @@ function marry(s: GameState, a: Npc, b: Npc) {
   a.spouse = b.id; b.spouse = a.id;
   s.couples.push({ a: a.id, b: b.id, since: s.day, kids: 0 });
   const home = bld(s, a.home);
-  if (home && housed(s, home) < HOUSE_CAP) b.home = home.id;
+  if (home && housed(s, home) < bedsOf(home)) b.home = home.id;
   emote(s, a, 'heart'); emote(s, b, 'heart');
   bio(s, a, 'bio.married', { n: '@name:' + b.name }); bio(s, b, 'bio.married', { n: '@name:' + a.name });
   log(s, 'log.married', { a: '@name:' + a.name, b: '@name:' + b.name });

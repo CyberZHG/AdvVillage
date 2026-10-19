@@ -1,4 +1,5 @@
 import type { Ground } from './data';
+import { culture } from './culture';
 
 export type Fam =
   | 'slime' | 'flyer' | 'bird' | 'beast' | 'boar' | 'bear' | 'humanoid' | 'golem' | 'spider' | 'scorpion'
@@ -17,6 +18,8 @@ export interface MonsterDef {
   zone: number; drops: [string, number][]; biomes?: Ground[];
   // roams only around this village
   village?: string;
+  // a creature of Chinese or Japanese lore: common in that language, rare elsewhere
+  lang?: string;
 }
 
 type Row = [string, Fam, number, number, [string, number][], Ground[]?, number?];
@@ -24,6 +27,75 @@ type Row = [string, Fam, number, number, [string, number][], Ground[]?, number?]
 // key, family, base level, zone, drops, biomes, strength multiplier
 const ROWS: Row[] = [
   ['slime', 'slime', 1, 0, [['gel', 3], ['meat', 1]]],
+  ['nian', 'bear', 30, -1, [['gem', 2], ['goldOre', 3], ['emberCore', 1]], undefined, 1.25],
+  // the village champions that rise after the sixteenth year, and the final enemy
+  ['crimsonStag', 'beast', 60, -1, [['heartwood', 3], ['gem', 3]], undefined, 2],
+  ['magmaColossus', 'golem', 60, -1, [['magmaHeart', 3], ['gem', 3]], undefined, 2],
+  ['serpentQueen', 'snake', 60, -1, [['mistPearl', 3], ['gem', 3]], undefined, 2],
+  ['frostWyrm', 'dragon', 60, -1, [['everIce', 3], ['gem', 3]], undefined, 2],
+  ['duneDjinn', 'wisp', 60, -1, [['sunStone', 3], ['gem', 3]], undefined, 2],
+  ['worldEater', 'dragon', 80, -1, [['voidShard', 5], ['soulGem', 5]], undefined, 3],
+  // creatures of Chinese myth and Japanese folklore
+  ['jingwei', 'bird', 2, 0, [['feather', 2], ['meat', 1]]],
+  ['dangkang', 'boar', 3, 0, [['meat', 2], ['tusk', 1]]],
+  ['xuangui', 'crab', 4, 0, [['shell', 2], ['pearl', 0.2]]],
+  ['wenyaoyu', 'bird', 4, 0, [['wing', 1], ['pearl', 0.3]]],
+  ['xingxing', 'beast', 5, 0, [['pelt', 1], ['fruit', 2]]],
+  ['paoxiao', 'beast', 6, 0, [['horn', 1], ['meat', 2]]],
+  ['shanxiao', 'humanoid', 6, 0, [['pelt', 1], ['herb', 1]]],
+  ['feiyi', 'snake', 7, 0, [['snakeskin', 1], ['venom', 1]]],
+  ['tiangou', 'beast', 8, 0, [['pelt', 1], ['fang', 1]]],
+  ['jiuweihu', 'beast', 12, 1, [['pelt', 2], ['feather', 1]]],
+  ['zheng', 'beast', 12, 1, [['pelt', 1], ['horn', 1]]],
+  ['kui', 'beast', 14, 1, [['horn', 1], ['crystal', 0.4]]],
+  ['bifang', 'bird', 15, 1, [['feather', 2], ['emberCore', 0.3]]],
+  ['gudiao', 'bird', 16, 1, [['feather', 1], ['claw', 1]]],
+  ['huashe', 'snake', 17, 1, [['snakeskin', 1], ['venom', 1]]],
+  ['jiangshi', 'humanoid', 18, 1, [['cloth', 1], ['bone', 1]]],
+  ['baigujing', 'ghost', 20, 1, [['bone', 2], ['ecto', 1]]],
+  ['xiezhi', 'beast', 20, 1, [['horn', 1], ['moonstone', 0.3]]],
+  ['qingluan', 'bird', 22, 1, [['feather', 2], ['gem', 0.3]]],
+  ['qilin', 'beast', 26, 2, [['horn', 1], ['gem', 0.5]]],
+  ['pixiu', 'beast', 27, 2, [['goldOre', 1], ['gem', 0.4]]],
+  ['baize', 'beast', 28, 2, [['horn', 1], ['moonstone', 0.5]]],
+  ['qiongqi', 'beast', 30, 2, [['fang', 1], ['wing', 1]]],
+  ['taowu', 'beast', 32, 2, [['fang', 1], ['pelt', 1]]],
+  ['taotie', 'bear', 34, 2, [['goldOre', 1], ['fang', 1]]],
+  ['hundun', 'slime', 35, 2, [['gel', 2], ['voidShard', 0.4]]],
+  ['niumowang', 'humanoid', 36, 2, [['horn', 1], ['iron', 2]]],
+  ['kun', 'dragon', 38, 2, [['pearl', 1], ['scale', 1]]],
+  ['yinglong', 'dragon', 40, 2, [['dragonFang', 0.5], ['scale', 1]]],
+  ['zhulong', 'dragon', 40, 2, [['emberCore', 0.6], ['scale', 1]]],
+  ['kodama', 'plant', 2, 0, [['herb', 2]]],
+  ['bakedanuki', 'beast', 3, 0, [['pelt', 1], ['meat', 1]]],
+  ['karakasa', 'ghost', 3, 0, [['cloth', 2]]],
+  ['chochin', 'wisp', 4, 0, [['wispLight', 1], ['cloth', 1]]],
+  ['kappa', 'frog', 5, 0, [['shell', 1], ['pearl', 0.2]]],
+  ['hitotsume', 'humanoid', 5, 0, [['cloth', 1], ['meat', 1]]],
+  ['onibi', 'wisp', 6, 0, [['wispLight', 1], ['ecto', 1]]],
+  ['nopperabo', 'ghost', 7, 0, [['ecto', 1], ['cloth', 1]]],
+  ['ittanmomen', 'ghost', 7, 0, [['silk', 1], ['cloth', 1]]],
+  ['kamaitachi', 'beast', 8, 0, [['claw', 1], ['pelt', 1]]],
+  ['nekomata', 'beast', 12, 1, [['pelt', 1], ['fang', 1]]],
+  ['yako', 'beast', 13, 1, [['pelt', 2], ['feather', 1]]],
+  ['tengu', 'humanoid', 15, 1, [['feather', 2], ['wing', 1]]],
+  ['rokurokubi', 'ghost', 16, 1, [['ecto', 1], ['silk', 1]]],
+  ['yamauba', 'humanoid', 17, 1, [['herb', 1], ['cloth', 1]]],
+  ['komainu', 'golem', 18, 1, [['stone', 3], ['crystal', 0.4]]],
+  ['raiju', 'beast', 19, 1, [['crystal', 0.5], ['fang', 1]]],
+  ['yukionna', 'ghost', 20, 1, [['frostShard', 1], ['ecto', 1]]],
+  ['nureonna', 'snake', 21, 1, [['snakeskin', 1], ['venom', 1]]],
+  ['dodomeki', 'humanoid', 22, 1, [['ecto', 1], ['gem', 0.2]]],
+  ['akaoni', 'humanoid', 26, 2, [['horn', 1], ['iron', 2]]],
+  ['tsuchigumo', 'spider', 27, 2, [['silk', 2], ['venom', 1]]],
+  ['nue', 'beast', 28, 2, [['pelt', 1], ['feather', 1]]],
+  ['ushioni', 'spider', 30, 2, [['horn', 1], ['venom', 1]]],
+  ['nurikabe', 'golem', 30, 2, [['golemCore', 0.5], ['crystal', 0.5]]],
+  ['wanyudo', 'wisp', 32, 2, [['emberCore', 0.6]]],
+  ['umibozu', 'ghost', 34, 2, [['pearl', 1], ['ecto', 1]]],
+  ['gashadokuro', 'golem', 36, 2, [['bone', 3], ['soulGem', 0.4]]],
+  ['orochi', 'dragon', 38, 2, [['scale', 1], ['dragonFang', 0.5]]],
+  ['shutendoji', 'humanoid', 40, 2, [['horn', 1], ['goldOre', 1]]],
   ['mossTurtle', 'crab', 4, 0, [['shell', 2], ['pearl', 0.3], ['herb', 1]]],
   ['rockMole', 'beast', 7, 0, [['claw', 2], ['silverOre', 0.6], ['iron', 1]]],
   ['bogLantern', 'wisp', 12, 1, [['wispLight', 2], ['spore', 1]]],
@@ -175,10 +247,20 @@ export const MONSTERS: Record<string, MonsterDef> = Object.fromEntries(ROWS.map(
 // expedition natives also roam the map, rarely, in the ring that matches their strength
 export const RARE_WEIGHT = 1 / 30;
 export const mapZone = (d: MonsterDef) => (d.zone >= 0 ? d.zone : d.base < 10 ? 0 : d.base < 25 ? 1 : 2);
-export const spawnWeight = (d: MonsterDef) => (d.zone >= 0 ? 1 : RARE_WEIGHT);
+export const spawnWeight = (d: MonsterDef) => (d.zone >= 0 ? 1 : RARE_WEIGHT) * (d.lang && d.lang !== culture.lang ? 0.06 : 1);
 
 export const zoneMonsters = (zone: number, ground: Ground, village = '') =>
   Object.keys(MONSTERS).filter((k) => mapZone(MONSTERS[k]) === zone && (!MONSTERS[k].biomes || MONSTERS[k].biomes!.includes(ground)) && (!MONSTERS[k].village || MONSTERS[k].village === village));
 // each village has a creature of its own, and it turns up a little more often than the rest
-const LOCAL: Record<string, string> = { mossTurtle: 'maple', rockMole: 'iron', bogLantern: 'mist', frostFox: 'frost', dustDevil: 'sun' };
+// the Nian only comes at the Spring Festival, never with the ordinary spawns
+const LOCAL: Record<string, string> = { nian: 'festival', crimsonStag: 'champion', magmaColossus: 'champion', serpentQueen: 'champion', frostWyrm: 'champion', duneDjinn: 'champion', worldEater: 'champion', mossTurtle: 'maple', rockMole: 'iron', bogLantern: 'mist', frostFox: 'frost', dustDevil: 'sun' };
 for (const [k, v] of Object.entries(LOCAL)) MONSTERS[k].village = v;
+// lore creatures leave a find of their homeland, rarer than their own drops: talismans and jade pendants
+// from the Chinese, fox-fire and tengu feathers from the Japanese, dragon scales and kappa plates from the strongest
+const REGIONAL: Record<string, string[]> = { zh: ['talisman', 'jadePendant', 'loongScale'], ja: ['kitsunebi', 'tenguFeather', 'kappaPlate'] };
+const regional = (lang: string, keys: string[]) => { for (const k of keys) { const d = MONSTERS[k], item = REGIONAL[lang][Math.max(0, mapZone(d))]; d.drops.push([item, d.zone >= 2 ? 0.45 : 0.35]); } };
+const ZH_LORE = ['jingwei', 'dangkang', 'xuangui', 'wenyaoyu', 'xingxing', 'paoxiao', 'shanxiao', 'feiyi', 'tiangou', 'jiuweihu', 'zheng', 'kui', 'bifang', 'gudiao', 'huashe', 'jiangshi', 'baigujing', 'xiezhi', 'qingluan', 'qilin', 'pixiu', 'baize', 'qiongqi', 'taowu', 'taotie', 'hundun', 'niumowang', 'kun', 'yinglong', 'zhulong'];
+for (const k of ['kodama', 'bakedanuki', 'karakasa', 'chochin', 'kappa', 'hitotsume', 'onibi', 'nopperabo', 'ittanmomen', 'kamaitachi', 'nekomata', 'yako', 'tengu', 'rokurokubi', 'yamauba', 'komainu', 'raiju', 'yukionna', 'nureonna', 'dodomeki', 'akaoni', 'tsuchigumo', 'nue', 'ushioni', 'nurikabe', 'wanyudo', 'umibozu', 'gashadokuro', 'orochi', 'shutendoji']) MONSTERS[k].lang = 'ja';
+for (const k of ZH_LORE) MONSTERS[k].lang = 'zh';
+regional('zh', ZH_LORE);
+regional('ja', Object.keys(MONSTERS).filter((k) => MONSTERS[k].lang === 'ja'));

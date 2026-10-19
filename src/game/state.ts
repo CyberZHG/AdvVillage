@@ -7,7 +7,8 @@ import { makeLook, randomJob } from './looks';
 import { comboAppeal } from './combos';
 import { titleBonus } from './social';
 import { rbonus } from './research';
-import { skillMult } from './skills';
+import { schoolMult, skillMult } from './skills';
+import { boon } from './legacy';
 import type { Building, Cls, GameState, LogParam, Monster, Npc, ResNode, Role } from './types';
 
 export const NAME_POOL = 128;
@@ -20,7 +21,11 @@ export const npcById = (s: GameState, id: number | null) => (id == null ? undefi
 export const ofKind = (s: GameState, kind: string) => s.buildings.filter((b) => BUILDINGS[b.type].kind === kind);
 export const guild = (s: GameState) => s.buildings.find((b) => b.type === 'guild')!;
 export const tod = (s: GameState) => (s.time % DAY) / DAY;
-export const isNight = (s: GameState) => tod(s) >= NIGHT_START || tod(s) < MORNING;
+// the frost village's winter nights fall early and last long
+const longNight = (s: GameState) => s.village === 'frost' && Math.floor((s.day % 120) / 30) === 3;
+export const isNight = (s: GameState) => tod(s) >= (longNight(s) ? NIGHT_START - 0.08 : NIGHT_START) || tod(s) < MORNING;
+// the hour as the light shows it: in a frost-village winter dusk comes on sooner
+export const lightHour = (s: GameState) => { const t = tod(s); return longNight(s) && t > 0.45 ? Math.min(0.999, t + 0.08 * Math.min(1, (t - 0.45) / 0.15)) : t; };
 export const year = (s: GameState) => Math.floor(s.day / 120) + 1;
 export const residents = (s: GameState) => s.npcs.filter((n) => n.role !== 'tourist');
 
@@ -87,7 +92,7 @@ export function maxHp(s: GameState, n: Npc): number {
   let hp = c.hp + c.hpG * n.level;
   hp += (equipByKey(n.armor)?.hp ?? 0) * forged(s, n.armor);
   hp += (equipByKey(n.accessory)?.hp ?? 0) * forged(s, n.accessory);
-  hp *= titleBonus(n).hp * (n.promoted ? PROMOTE_BONUS : 1) * skillMult(n, 'vigor');
+  hp *= titleBonus(n).hp * (n.promoted ? PROMOTE_BONUS : 1) * skillMult(n, 'vigor') * schoolMult(n, 'hp') * boon('hp');
   return Math.round(hp);
 }
 
@@ -108,7 +113,8 @@ export function fighterStats(s: GameState, n: Npc): Stats {
   if (rivalNear(s, n)) m *= 1.1;
   m *= (1 + rbonus(s, 'tactics')) * (n.promoted ? PROMOTE_BONUS : 1);
   const tb = titleBonus(n);
-  return { maxHp: maxHp(s, n), atk: atk * m * tb.atk * skillMult(n, 'blade'), def: def * m * tb.def * skillMult(n, 'guard'), range: c.range, interval: c.interval };
+  if ((n.luck ?? 0) > s.time) atk *= n.luckK ?? 1.1;
+  return { maxHp: maxHp(s, n), atk: atk * m * tb.atk * skillMult(n, 'blade') * schoolMult(n, 'atk') * boon('atk'), def: def * m * tb.def * skillMult(n, 'guard') * schoolMult(n, 'def'), range: c.range, interval: c.interval };
 }
 
 // a rival fighting close by spurs both of them on
@@ -122,9 +128,11 @@ export function rivalNear(s: GameState, n: Npc): boolean {
 export function monsterStats(s: GameState, type: string, m?: Monster) {
   const d = MONSTERS[type], L = m?.lv ?? s.mlv[type].level;
   const g = 1 + 0.25 * (L - 1);
-  const hp = d.hp * g * (m?.boss != null ? 8 : 1) * (m?.shiny ? 1.5 : 1);
-  const atk = d.atk * g * (m?.boss != null ? 1.4 : 1);
-  return { maxHp: Math.round(hp), atk, def: d.def * (1 + 0.2 * (L - 1)) * (m?.boss != null ? 1.2 : 1), level: L };
+  // champions and the final boss carry a vast multiple of a boss's health and hit far harder
+  const ch = m?.champ ? (m.champ === 'final' ? 2.4 : 1.6) : 1;
+  const hp = d.hp * g * (m?.boss != null ? 8 : 1) * (m?.shiny ? 1.5 : 1) * (m?.hpMul ?? 1);
+  const atk = d.atk * g * (m?.boss != null ? 1.4 : 1) * ch;
+  return { maxHp: Math.round(hp), atk, def: d.def * (1 + 0.2 * (L - 1)) * (m?.boss != null ? 1.2 : 1) * (1 + (ch - 1) * 0.5), level: L };
 }
 
 export function debuffs(n: Npc): string[] {
@@ -136,15 +144,16 @@ export function debuffs(n: Npc): string[] {
 }
 
 export const housed = (s: GameState, b: Building) => s.npcs.filter((n) => n.home === b.id).length;
+export const bedsOf = (b: Building) => BUILDINGS[b.type].beds ?? HOUSE_CAP;
 export const freeBeds = (s: GameState) =>
-  ofKind(s, 'house').reduce((a, b) => a + HOUSE_CAP - housed(s, b), 0);
+  ofKind(s, 'house').reduce((a, b) => a + bedsOf(b) - housed(s, b), 0);
 
 export function assignHousing(s: GameState) {
   const houses = ofKind(s, 'house');
   const order = (r: Role) => (r === 'civilian' ? 1 : 0);
   const homeless = s.npcs.filter((n) => n.home == null && n.role !== 'tourist').sort((a, b) => order(a.role) - order(b.role));
   for (const n of homeless) {
-    const h = houses.find((b) => housed(s, b) < HOUSE_CAP);
+    const h = houses.find((b) => housed(s, b) < bedsOf(b));
     if (!h) break;
     n.home = h.id;
   }

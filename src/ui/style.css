@@ -171,7 +171,10 @@ a[data-act] { color: var(--accent); cursor: pointer; text-decoration: underline;
 .ach { font-size: 22px; width: 28px; text-align: center; color: #6a7090; }
 .ach.got { color: var(--accent); }
 #import-text { width: 100%; margin: 8px 0; font-family: monospace; font-size: 11px; background: #0e1330; color: var(--text); border: 1px solid var(--edge); border-radius: 4px; }
-#import-file { color: var(--text); }
+#import-file { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.dropzone { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 84px; margin: 8px 0; padding: 12px; border: 2px dashed var(--edge); border-radius: 8px; color: var(--text); text-align: center; cursor: pointer; background: rgba(14,19,48,0.5); transition: background 0.15s, border-color 0.15s; }
+.dropzone:hover, .dropzone.over { border-color: #ffd34a; background: rgba(255,211,74,0.12); }
+.dropzone small { color: #b6ff7a; }
 .fest { color: #ffb0d0; margin-left: 6px; }
 .bossbadge { margin-left: 8px; padding: 1px 6px; background: #c83a3a; color: #fff; border-radius: 3px; cursor: pointer; animation: pulse 1s infinite alternate; }
 @keyframes pulse { from { opacity: 0.6; } to { opacity: 1; } }

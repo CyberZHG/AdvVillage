@@ -1,22 +1,24 @@
 import { EXP_H, EXP_W } from '../render/expbar';
+import { SPECIALTY, TRADE_DAYS, TRADE_IN, TRADE_OUT, questSteps, MEGA, MEGA_STAGES, megaCost, megaDone, canMega, DISASTER, LEGEND } from '../game/village';
 import { t, fmt, npcName, param, LANGS, getLang } from '../i18n';
 import {
   BUILDINGS, CATEGORIES, CLASS_KEYS, DECOR_MAX, DECOR_RADIUS, DECOR_STEP, EQUIP, EXPEDITIONS, ITEMS, MONSTERS, mapZone, ROAD_COST,
-  SHOP_TIER_LEVELS, VILLAGES, WONDER_STAGES, bldAvailable, finished, wonderCost, ROAD_STYLES, villageDef, shopTier, equipByKey, type Category, type Cost, type Slot,
+  SHOP_TIER_LEVELS, VILLAGES, WONDER_STAGES, bldAvailable, finished, wonderCost, wonderLevelMat, ROAD_STYLES, villageDef, shopTier, equipByKey, type Category, type Cost, type Slot,
 } from '../game/data';
-import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, EXPANSIONS, HOUSE_CAP, SCORE_YEAR } from '../game/constants';
+import { DAY, DAYS_PER_MONTH, DAYS_PER_YEAR, EXPANSIONS, SCORE_YEAR } from '../game/constants';
 import { bldExpNeed, expNeed, famExpNeed, forgeMult, lvMult } from '../game/level';
 import {
-  attraction, bld, debuffs, fighterStats, housed, maxHp, monsterStats, npcById, residents, tod, year,
+  attraction, bedsOf, bld, debuffs, fighterStats, housed, maxHp, monsterStats, npcById, residents, tod, year,
 } from '../game/state';
 import {
-  buildCost, canAdvance, canBuild, computeScore, expansionCost, forgeCost, forgeable, goodsItem, goodsPrice, hasCost, upgradeCost,
+  buildCost, canAdvance, canBuild, computeScore, expansionCost, forgeCost, forgeable, canUpgrade, goodsItem, goodsPrice, hasCost, upgradeCost,
 } from '../game/econ';
 import { commissionText, progress, seasonEnds } from '../game/commissions';
 import { FAME_RANKS, VIPS, fameRank } from '../game/fame';
 import { ACHIEVEMENTS } from '../game/achievements';
 import { COMBOS, COMBO_RADIUS, activeCombos, combosOf, decorBonus } from '../game/combos';
-import { SEASONS, currentBoss, festival, season } from '../game/events';
+import { SEASONS, currentBoss, festival, gatherMult, season } from '../game/events';
+import { bossName } from './names';
 import { titleBonus } from '../game/social';
 import { buildingIcon, catIcon, humanIcon, itemIcon, monsterIcon, tileIcon, uiIcon } from '../render/art';
 import { CLASS_COLOR, type Sel } from '../render/renderer';
@@ -144,8 +146,10 @@ export function updateHud(c: Ctl, tab: Tab | null) {
 
   const placing = $('placing');
   placing.classList.toggle('hidden', !c.placing);
-  if (c.placing === 'clear') setHtml('placing', `${t('ui.clearing')} ${btn('cancelPlace', t('ui.done'))}`);
-  else if (c.placing === 'road' || c.placing === 'unroad') setHtml('placing', `${t(c.placing === 'road' ? 'ui.paintingRoad' : 'ui.removingRoad')} ${c.placing === 'road' ? money(ROAD_COST) : ''} ${btn('cancelPlace', t('ui.done'))}`);
+  // on touch screens the paving tools say how to pave without losing the ability to pan
+  const touchHint = matchMedia('(pointer: coarse)').matches ? `<br><small>${t('ui.paintHint')}</small>` : '';
+  if (c.placing === 'clear') setHtml('placing', `${t('ui.clearing')} ${btn('cancelPlace', t('ui.done'))}${touchHint}`);
+  else if (c.placing === 'road' || c.placing === 'unroad') setHtml('placing', `${t(c.placing === 'road' ? 'ui.paintingRoad' : 'ui.removingRoad')} ${c.placing === 'road' ? money(ROAD_COST) : ''} ${btn('cancelPlace', t('ui.done'))}${touchHint}`);
   else if (c.placing) setHtml('placing', `${t('ui.placing', { b: t('b.' + c.placing) })} ${costHtml(s, buildCost(s, c.placing))} ${BUILDINGS[c.placing].kind !== 'decor' ? btn('rotate', t('ui.rotate')) : ''} ${btn('cancelPlace', t('ui.cancel'))}`);
 
   const panel = $('panel');
@@ -208,7 +212,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     const rows = [...s.buildings].sort((a, b) => a.type.localeCompare(b.type) || b.level - a.level).map((b) => `
       <div class="row click" data-act="select:bld:${b.id}">${img(buildingIcon(b.type), 'bimg sm')}
         <span class="grow"><b>${t('b.' + b.type)}</b> ${t('ui.lv', { lv: b.level })}<br>${bar(b.exp / bldExpNeed(b.level))}</span>
-        ${BUILDINGS[b.type].kind === 'house' ? `<span>${housed(s, b)}/${HOUSE_CAP}</span>` : ''}
+        ${BUILDINGS[b.type].kind === 'house' ? `<span>${housed(s, b)}/${bedsOf(b)}</span>` : ''}
       </div>`);
     return comboBox + (rows.join('') || `<p>${t('ui.none')}</p>`);
   },
@@ -230,13 +234,17 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
   guild(c) {
     const s = c.s;
     let h = commissionsHtml(s);
-    const boss = currentBoss(s);
-    if (boss) {
-      const st = monsterStats(s, boss.type, boss);
-      const rally = s.npcs.filter((n) => n.role === 'fighter' && n.goalId === boss.id && (n.state === 'hunt' || n.state === 'fight')).length;
-      h += `<h3 class="bad">${t('ui.boss')}</h3><div class="row click" data-act="select:mon:${boss.id}">${img(monsterIcon(boss.type), 'mimg')}
-        <span class="grow"><b>${t('boss.' + boss.boss)}${t('m.' + boss.type)}</b> ${t('ui.lv', { lv: boss.lv })}<br>${bar(boss.hp / st.maxHp, 'hp')}
-        <small>${t('ui.bossInfo', { n: rally, d: Math.max(0, Math.ceil(((boss.until ?? 0) - s.time) / DAY)) })}</small></span></div>`;
+    const bosses = s.monsters.filter((m) => m.boss != null);
+    if (bosses.length) {
+      // every boss abroad, and how much the gatherers lose while they roam
+      h += `<h3 class="bad">${t('ui.boss')}</h3><p class="meta">${t('ui.bossGather', { p: Math.round((1 - gatherMult(s)) * 100) })}</p>`;
+      for (const boss of bosses) {
+        const st = monsterStats(s, boss.type, boss);
+        const rally = s.npcs.filter((n) => n.role === 'fighter' && n.goalId === boss.id && (n.state === 'hunt' || n.state === 'fight')).length;
+        h += `<div class="row click" data-act="select:mon:${boss.id}">${img(monsterIcon(boss.type), 'mimg')}
+        <span class="grow"><b>${bossName(boss)}</b> ${t('ui.lv', { lv: boss.lv })}<br>${bar(boss.hp / st.maxHp, 'hp')}
+        <small>${t('ui.bossRally', { n: rally })}</small></span></div>`;
+      }
     }
     if (s.merchant) {
       h += `<h3>${t(s.merchant.foreign ? 'ui.caravan' : 'ui.merchant')}</h3><p class="meta">${t('ui.merchantHint', { d: Math.max(0, Math.ceil((s.merchant.until - s.time) / DAY)) })}</p>`;
@@ -257,7 +265,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       h += `<div class="box"><b>${t('ex.' + def.key)}</b> — ${t('exs.' + e.state)}${e.state !== 'depart' ? ` (${t('ui.daysLeft', { n: left })})` : ''}
         <br>${t('ui.party')}: ${names}${e.state === 'away' ? `<br>${t('ui.record', { w: e.wins, l: e.losses })}` : ''}</div>`;
     }
-    h += EXPEDITIONS.map((d) => {
+    h += EXPEDITIONS.filter((d) => !d.village || d.village === s.village).map((d) => {
       const locked = year(s) < d.unlockYear;
       const mons = d.monsters.map((m) => s.seen.includes(m)
         ? `<span class="tag">${img(monsterIcon(m), 'mimg sm')}${t('m.' + m)} ${t('ui.lv', { lv: s.mlv[m].level })}</span>`
@@ -378,8 +386,8 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
       <span>${t('ui.touristTotal')}</span><b>${fmt(s.stats.tourists)}</b></div>`;
     const fest = festival(s);
     const effects = s.effects.filter((e) => e.until > s.time).map((e) => `<span class="tag">${t('eff.' + e.k)}</span>`).join('');
-    h += `<div class="kv"><span>${t('ui.season')}</span><b>${SEASON_ICON[season(s)]} ${t('season.' + SEASONS[season(s)])}${fest ? ` · <span class="fest">${t('fest.' + fest)}</span>` : ''}</b>
-      <span>${t('ui.weather')}</span><b>${WEATHER_ICON[s.weather] ?? ''} ${t('weather.' + s.weather)}</b>${effects ? `<span>${t('ui.effects')}</span><b>${effects}</b>` : ''}
+    h += `<div class="kv"><span>${t('ui.season')}</span><b>${ui(SEASON_ICON[season(s)])} ${t('season.' + SEASONS[season(s)])}${fest ? ` · <span class="fest">${t('fest.' + fest)}</span>` : ''}</b>
+      <span>${t('ui.weather')}</span><b>${WEATHER_ICON[s.weather] ? ui(WEATHER_ICON[s.weather]) : ''} ${t('weather.' + s.weather)}</b>${effects ? `<span>${t('ui.effects')}</span><b>${effects}</b>` : ''}
       <span>${t('ui.hotNow')}</span><b>${SEASON_HOT[season(s)].map((k) => `<span class="tag good">${t('b.' + k)}</span>`).join('')}</b></div>`;
     h += chartHtml(s);
     h += `<h3>${t('ui.reports')}</h3>`;
@@ -387,6 +395,32 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     h += `<h3>${t('ui.expand')}</h3>`;
     h += ec ? `<div class="row"><span class="grow">${t('ui.expandDesc', { lv: s.vlv + 1 })}<br>${costHtml(s, ec)}</span>${btn('expand', t('ui.expand'), { disabled: !hasCost(s, ec) })}</div>`
       : `<p class="meta">${t('ui.expandMax')}</p>`;
+    // the village's own storyline, step by step
+    const steps = questSteps(s), done = s.vquest ?? 0;
+    if (steps.length) h += `<h3>${t('ui.vquest')}</h3>` + steps.map(([k], i) => `<div class="row ${i > done ? 'dim' : ''}">${ui(i < done ? 'star' : 'starEmpty')}<span class="grow">${t(`vq.${s.village}.${k}`)}</span></div>`).join('');
+    // the village's great work
+    const mk = MEGA[s.village];
+    if (mk) {
+      const k = s.mega ?? 0, c = megaCost(s);
+      h += `<h3>${t('ui.mega')}: ${t('mega.' + mk)} <small>${k}/${MEGA_STAGES}</small></h3><p class="meta">${t('megad.' + mk)}</p>`;
+      if (megaDone(s)) h += `<p class="good">${t('ui.megaDone')}</p>`;
+      else if (year(s) < 3) h += `<p class="meta">${t('ui.unlockYear', { y: 3 })}</p>`;
+      else h += `<div class="row"><span class="grow">${costHtml(s, c)} <span class="tag">${img(itemIcon(c.mat))}${t('item.' + c.mat)} ${fmt(s.items[c.mat] ?? 0)}/${c.count}</span></span>${btn('mega', t('ui.megaBuild'), { disabled: !canMega(s) })}</div>`;
+    }
+    // the village's own trouble and its legendary beast
+    const dz = DISASTER[s.village], lg = LEGEND[s.village];
+    if (dz) h += `<p class="meta">${t('ui.disaster', { d: '@disn.' + dz.k })}${s.disaster ? ` · <b>${t(s.disaster.saved ? 'ui.disasterSaved' : 'ui.disasterNow')}</b>` : ''}</p>`;
+    if (lg) h += `<p class="meta">${t('ui.legend', { m: '@m.' + lg.type, i: `@item.${lg.relic}` })}</p>`;
+    // trade caravans to the other villages already opened
+    const others = VILLAGES.filter((v, i) => v.key !== s.village && (i <= c.meta.unlocked || (c.meta.best[v.key] ?? 0) > 0));
+    const out = SPECIALTY[s.village];
+    h += `<h3>${t('ui.trade')}</h3>`;
+    if (!others.length || !out) h += `<p class="meta">${t('ui.tradeNone')}</p>`;
+    else {
+      h += `<p class="meta">${t('ui.tradeHint', { o: TRADE_OUT, a: `@item.${out}`, i: TRADE_IN, d: TRADE_DAYS })}</p>`;
+      h += `<div class="btns">${others.map((v) => btn('trade:' + v.key, `${t('ui.tradeSend', { v: `@village.${v.key}.name` })} ${img(itemIcon(SPECIALTY[v.key]))}`, { disabled: (s.items[out] ?? 0) < TRADE_OUT || (s.trades?.length ?? 0) >= 2 })).join('')}</div>`;
+      if (s.trades?.length) h += `<p class="meta">${t('ui.tradeOnRoad', { n: s.trades.length })}</p>`;
+    }
     h += `<h3>${s.score ? t('ui.finalScore') : t('ui.projectedScore')}</h3>${scoreTable(sc)}<div class="btns">${btn('share', t('ui.shareImage'), { cls: 'primary' })}</div>`;
     if (!s.score) h += `<p class="meta">${t('ui.scoreHint', { y: SCORE_YEAR })}</p>`;
     return h;
@@ -395,7 +429,7 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
   settings(c) {
     const langs = Object.entries(LANGS).map(([k, p]) => btn('lang:' + k, p.label, { cls: getLang() === k ? 'on' : '' })).join('');
     return `<h3>${t('ui.language')}</h3><div class="btns">${langs}</div>
-      <h3>${t('ui.crowd')}</h3><div class="btns">${['all', 'lite', 'min'].map((k) => btn('crowd:' + k, t('crowd.' + k), { cls: (c.meta.crowd ?? 'all') === k ? 'on' : '' })).join('')}</div>
+      <h3>${t('ui.crowd')}</h3><div class="btns">${['all', 'lite', 'min', 'fighters'].map((k) => btn('crowd:' + k, t('crowd.' + k), { cls: (c.meta.crowd ?? 'all') === k ? 'on' : '' })).join('')}</div>
       <p class="meta">${t('ui.crowdHint')}</p>
       <h3>${t('ui.auto')}</h3><div class="btns">${AUTO_KEYS.map((k) => btn('auto:' + k, t('auto.' + k), { cls: c.s.auto[k] ? 'on' : '' })).join('')}</div>
       <p class="meta">${t('ui.autoHint', { v: fmt(autoReserve(c.s)) })}</p>
@@ -517,7 +551,7 @@ function buildingBody(c: Ctl, b: Building): string {
   h += `<span>${t('ui.bonus')}</span><b>×${lvMult(b.level).toFixed(2)}</b></div>`;
   if (d.kind === 'house') {
     const ppl = s.npcs.filter((n) => n.home === b.id);
-    h += `<div>${t('ui.residentsOf', { n: ppl.length, c: HOUSE_CAP })}: ${ppl.map((n) => `<a data-act="select:npc:${n.id}">${esc(npcName(n.name))}</a>`).join(', ') || '-'}</div>`;
+    h += `<div>${t('ui.residentsOf', { n: ppl.length, c: bedsOf(b) })}: ${ppl.map((n) => `<a data-act="select:npc:${n.id}">${esc(npcName(n.name))}</a>`).join(', ') || '-'}</div>`;
   }
   if (d.slot) {
     const tier = shopTier(b.level);
@@ -539,7 +573,9 @@ function buildingBody(c: Ctl, b: Building): string {
   if (d.kind === 'guild') h += `<div class="btns">${btn('tab:guild', t('tab.guild'))}</div>`;
   if (d.kind === 'forge') h += `<div class="btns">${btn('tab:forge', t('tab.forge'))}</div>`;
   const uc = upgradeCost(s, b);
-  h += `<div class="row"><span class="grow">${t('ui.upgradeTo', { lv: b.level + 1 })}<br>${costHtml(s, uc)}</span>${btn('upgrade:' + b.id, t('ui.upgrade'), { disabled: !hasCost(s, uc) })}</div>`;
+  const um = wonderLevelMat(b);
+  const umHtml = um ? ` <span class="tag">${img(itemIcon(um[0]))}${t('item.' + um[0])} ${fmt(s.items[um[0]] ?? 0)}/${um[1]}</span>` : '';
+  h += `<div class="row"><span class="grow">${t('ui.upgradeTo', { lv: b.level + 1 })}<br>${costHtml(s, uc)}${umHtml}</span>${btn('upgrade:' + b.id, t('ui.upgrade'), { disabled: !canUpgrade(s, b) })}</div>`;
   if (b.type !== 'guild') h += `<div class="btns right">${btn('demolish:' + b.id, pendingDemolish === b.id ? t('ui.confirmDemolish') : t('ui.demolish'), { cls: 'danger' })}</div>`;
   return `<div class="win-body">${h}</div>`;
 }
@@ -582,12 +618,13 @@ export function titleHtml(meta: Meta, hasSave: (k: string) => boolean): string {
     <div class="btns center">${langs}${btn('importOpen', t('ui.import'))}</div><div class="villages">${cards}</div></div>`;
 }
 
-export function scoreModalHtml(s: GameState, unlocked: string | null): string {
+export function scoreModalHtml(s: GameState, unlocked: string | null, postcard = ''): string {
   return `<div class="win modal-box"><div class="win-title"><b>${t('ui.scoreTitle', { y: SCORE_YEAR })}</b></div><div class="win-body">
     ${scoreTable(s.score!)}
     ${unlocked ? `<p class="good">${t('ui.unlocked', { v: '@village.' + unlocked + '.name' })}</p>` : ''}
+    <img class="share-img" src="${postcard}" alt="">
     <p class="meta">${t('ui.keepPlaying')}</p>
-    <div class="btns center">${btn('share', t('ui.shareImage'))}${btn('closeModal', t('ui.continuePlay'), { cls: 'primary' })}</div></div></div>`;
+    <div class="btns center">${btn('postcard', t('ui.postcardSave'))}${btn('share', t('ui.shareImage'))}${btn('closeModal', t('ui.continuePlay'), { cls: 'primary' })}</div></div></div>`;
 }
 
 export function confirmHtml(text: string, yes: string): string {
@@ -604,7 +641,7 @@ export function shareModalHtml(url: string, canShare: boolean): string {
 export function importModalHtml(): string {
   return `<div class="win modal-box wide"><div class="win-title"><b>${t('ui.import')}</b>${btn('closeModal', '✕', { cls: 'x' })}</div><div class="win-body">
     <p class="meta">${t('ui.importHint')}</p>
-    <input type="file" id="import-file" accept=".sav,.txt,text/plain">
+    <label id="import-drop" class="dropzone"><input type="file" id="import-file" accept=".sav,.txt,text/plain"><span>${t('ui.importDrop')}</span><small id="import-name"></small></label>
     <textarea id="import-text" rows="6" placeholder="AV1..."></textarea>
     <p class="bad">${t('ui.importWarn')}</p>
     <div class="btns center">${btn('importDo', t('ui.import'), { cls: 'danger' })}${btn('closeModal', t('ui.cancel'))}</div></div></div>`;

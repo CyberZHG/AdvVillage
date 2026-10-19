@@ -37,7 +37,7 @@ export const ACHIEVEMENTS: [string, Check][] = [
   ['quest30', (s) => s.stats.quests >= 30],
   ['rescue10', (s) => s.stats.rescues >= 10],
   ['exp1', (s) => s.stats.expeditions >= 1],
-  ['expAll', (s) => EXPEDITIONS.every((e) => s.stats.expLocs.includes(e.key))],
+  ['expAll', (s) => EXPEDITIONS.filter((e) => !e.village || e.village === s.village).every((e) => s.stats.expLocs.includes(e.key))],
   ['dex10', (s) => s.seen.length >= 10],
   ['dex50', (s) => s.seen.length >= 50],
   ['dex100', (s) => s.seen.length >= Object.keys(MONSTERS).length],
@@ -92,6 +92,13 @@ export const ACHIEVEMENTS: [string, Check][] = [
   ['promoted', (s) => s.npcs.some((n) => n.promoted)],
   ['research10', (s) => Object.values(s.research).reduce((a, b) => a + b, 0) >= 10],
   ['deep10', (s) => Object.values(s.depth).some((d) => d >= 9)],
+  // the village champions and the final enemy
+  ['champMaple', (s) => s.village === 'maple' && !!s.vstat?.champDown],
+  ['champIron', (s) => s.village === 'iron' && !!s.vstat?.champDown],
+  ['champMist', (s) => s.village === 'mist' && !!s.vstat?.champDown],
+  ['champFrost', (s) => s.village === 'frost' && !!s.vstat?.champDown],
+  ['champSun', (s) => s.village === 'sun' && !!s.vstat?.champDown],
+  ['finalBoss', (s) => !!s.vstat?.finalDown],
 ];
 
 export function checkAchievements(s: GameState, m: Meta): string[] {

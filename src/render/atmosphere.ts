@@ -115,11 +115,9 @@ export function drawWeather(ctx: CanvasRenderingContext2D, s: GameState, weather
   }
 
   if (weather === 'fog') {
-    ctx.fillStyle = 'rgba(225,230,235,0.28)'; ctx.fillRect(0, 0, w, hgt);
-    for (let k = 0; k < 6; k++) {
-      const y = Math.round(((h(k) * hgt + time * 3) % (hgt + 40)) - 20), x = Math.round(((time * (6 + k) + h(k + 3) * w) % (w + 200)) - 200);
-      ctx.fillStyle = 'rgba(240,244,248,0.22)'; ctx.fillRect(x, y, 200, 10 + (k % 3) * 6);
-    }
+    // a thin veil over everything; the thick of it lies in the low ground (drawn with the land), leaving the heights clear
+    ctx.fillStyle = 'rgba(225,230,235,0.14)'; ctx.fillRect(0, 0, w, hgt);
+
   }
   // a forked bolt now and then in a storm: one every ten seconds or so, with only a faint flash
   if (weather === 'storm') {

@@ -1,3 +1,4 @@
+import { legacy, setLegacy } from './game/legacy';
 import './ui/style.css';
 import { detectLang, getLang, setLang, t } from './i18n';
 import { loadArt } from './render/art';
@@ -10,7 +11,7 @@ import { VILLAGES, setCulture } from './game/data';
 import { deleteSave, exportAll, hasSave, importAll, loadGame, loadMeta, saveGame, saveMeta } from './game/save';
 import { checkAchievements } from './game/achievements';
 import { log } from './game/state';
-import { download, makeReportImage, makeShareImage, shareImage, toBlob } from './ui/share';
+import { download, makePostcard, makeReportImage, makeShareImage, shareImage, toBlob } from './ui/share';
 import { buyOffer, currentBoss } from './game/events';
 import { advanceWonder, build, canBuild, clearTerrain, demolish, expand, forgeUpgrade, launchExpedition, placeRoad, removeRoad, upgrade } from './game/econ';
 import { bld } from './game/state';
@@ -18,6 +19,7 @@ import { offlineHtml, roadStyle, setChartKind, setForgeSlot, setRoadStyle } from
 import { queueResearch, startResearch, unqueueResearch } from './game/research';
 import type { AutoKey } from './game/auto';
 import { petCat } from './game/cat';
+import { sendTrade, advanceMega } from './game/village';
 import { releasePet } from './game/pets';
 import { settleOffline } from './game/offline';
 import {
@@ -32,6 +34,7 @@ const $ = (id: string) => document.getElementById(id)!;
 blockZoom();
 registerSW();
 const meta = loadMeta();
+setLegacy(meta.legacy);
 setLang(detectLang(meta.lang));
 setCulture(getLang());
 
@@ -97,8 +100,10 @@ function startGame(village: string, fresh: boolean) {
 
 function achievements() {
   if (!s) return;
+  // the champions' fall and the final boss's shared health live in the meta save, shared by every village
+  meta.legacy = { champs: [...legacy.champs], finalHp: legacy.finalHp, finalDown: legacy.finalDown };
   const fresh = checkAchievements(s, meta);
-  if (!fresh.length) return;
+  if (!fresh.length) { saveMeta(meta); return; }
   for (const id of fresh) log(s, 'log.achievement', { a: `@ach.${id}.name` });
   toast(fresh.length > 3 ? t('ui.achMany', { n: fresh.length }) : t('ui.achUnlocked', { a: fresh.map((id) => t(`ach.${id}.name`)).join(' / ') }));
   saveMeta(meta);
@@ -120,6 +125,7 @@ function doImport() {
   try {
     if (s) saveGame(s);
     Object.assign(meta, importAll(text));
+    setLegacy(meta.legacy);
     setLang(meta.lang ?? getLang());
     showModal(null);
     toast(t('ui.importDone'));
@@ -129,6 +135,7 @@ function doImport() {
   }
 }
 
+let postcardCanvas: HTMLCanvasElement | null = null;
 function onScored() {
   if (!s?.score) return;
   const idx = VILLAGES.findIndex((v) => v.key === s!.village);
@@ -137,15 +144,17 @@ function onScored() {
   if (idx + 1 < VILLAGES.length && meta.unlocked < idx + 1) { meta.unlocked = idx + 1; unlocked = VILLAGES[idx + 1].key; }
   saveMeta(meta);
   achievements();
-  showModal(scoreModalHtml(s, unlocked));
+  postcardCanvas = makePostcard(s);
+  showModal(scoreModalHtml(s, unlocked, postcardCanvas.toDataURL()));
 }
 
 function act(a: string) {
   const [cmd, x, y] = a.split(':');
   if (cmd !== 'demolish' && cmd !== 'release') setPendingDemolish(null);
   switch (cmd) {
-    case 'tab': tab = tab === x ? null : (x as Tab); break;
-    case 'close': tab = null; break;
+    // closing the build window puts the tool away too, so a later tap can't build or pave by accident
+    case 'tab': { const was = tab; tab = tab === x ? null : (x as Tab); if (was === 'build' && tab !== 'build') renderer.ghost = null; break; }
+    case 'close': if (tab === 'build') renderer.ghost = null; tab = null; break;
     case 'speed': speed = Number(x); renderer.fast = speed >= 4; break;
     case 'place':
       renderer.ghost = x;
@@ -201,6 +210,8 @@ function act(a: string) {
     case 'expedition': if (launchExpedition(s!, x)) toast(t('log.expRecruit', { loc: '@ex.' + x })); break;
     case 'expand': if (!expand(s!)) toast(t('ui.notEnough')); break;
     case 'rstyle': setRoadStyle(Number(x)); break;
+    case 'trade': if (!sendTrade(s!, x)) toast(t('ui.notEnough')); break;
+    case 'mega': if (!advanceMega(s!)) toast(t('ui.notEnough')); break;
     case 'wonder': { const b = bld(s!, Number(x)); if (b && !advanceWonder(s!, b)) toast(t('ui.notEnough')); break; }
     case 'crowd':
       renderer.crowd = x as Crowd;
@@ -227,6 +238,7 @@ function act(a: string) {
     case 'reportShare': void openShare(Number(x)); return;
     case 'report': if (s) showModal(reportHtml(s, Number(x))); return;
     case 'buy': if (s && !buyOffer(s, Number(x))) toast(t('ui.notEnough')); break;
+    case 'postcard': if (postcardCanvas) void toBlob(postcardCanvas).then((b) => download(b, `postcard-${s!.village}.png`)); return;
     case 'shareDownload': if (shareBlob) download(shareBlob, `adventurer-village-${Date.now()}.png`); return;
     case 'shareNative': if (shareBlob) void shareImage(shareBlob, t('game.title')); return;
     case 'export': download(new Blob([exportText()], { type: 'text/plain' }), `advvillage-${new Date().toISOString().slice(0, 10)}.sav`); toast(t('ui.exported')); return;
@@ -243,10 +255,31 @@ function refresh() {
   if (s) updateHud(ctl, tab);
 }
 
+// a backup file can be picked, or dragged onto the drop zone (or anywhere on the import window)
+function loadImportFile(file: File) {
+  file.text().then((txt) => {
+    const area = $('import-text') as HTMLTextAreaElement | null;
+    if (area) area.value = txt.trim();
+    const name = $('import-name');
+    if (name) name.textContent = file.name;
+  });
+}
 document.addEventListener('change', (e) => {
   const input = e.target as HTMLInputElement;
   if (input.id !== 'import-file' || !input.files?.[0]) return;
-  input.files[0].text().then((txt) => { ($('import-text') as HTMLTextAreaElement).value = txt; });
+  loadImportFile(input.files[0]);
+});
+const dropZone = () => document.getElementById('import-drop');
+document.addEventListener('dragover', (e) => { const z = dropZone(); if (!z) return; e.preventDefault(); z.classList.add('over'); });
+document.addEventListener('dragleave', (e) => { const z = dropZone(); if (z && !e.relatedTarget) z.classList.remove('over'); });
+document.addEventListener('drop', (e) => {
+  const z = dropZone();
+  if (!z) return;
+  e.preventDefault();
+  z.classList.remove('over');
+  const file = e.dataTransfer?.files?.[0];
+  if (file) loadImportFile(file);
+  else { const txt = e.dataTransfer?.getData('text/plain'); if (txt) ($('import-text') as HTMLTextAreaElement).value = txt.trim(); }
 });
 document.addEventListener('click', (e) => {
   const el = (e.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
@@ -284,12 +317,24 @@ function paintTo(cx: number, cy: number) {
   paintFrom = to;
 }
 
+// on a touch screen a finger dragged with a paving tool pans the view as usual; a tap paves one tile and a press held
+// still for a moment, then dragged, paints a line. With a mouse, dragging paints straight away.
+let holdTimer = 0;
+const HOLD_MS = 300;
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   downAt = { x: e.clientX, y: e.clientY };
   dragging = false;
-  if (isRoadTool() && e.button === 0 && pointers.size === 1) { paintFrom = null; paintTo(e.clientX, e.clientY); }
+  clearTimeout(holdTimer);
+  if (isRoadTool() && e.button === 0 && pointers.size === 1) {
+    if (e.pointerType === 'touch') {
+      const px = e.clientX, py = e.clientY;
+      holdTimer = window.setTimeout(() => { if (!dragging && pointers.size === 1) { paintFrom = null; paintTo(px, py); navigator.vibrate?.(15); } }, HOLD_MS);
+    } else { paintFrom = null; paintTo(e.clientX, e.clientY); }
+  }
+  // a second finger always means pinch or pan: drop any painting
+  if (pointers.size >= 2) { clearTimeout(holdTimer); paintFrom = null; }
   if (pointers.size === 2) {
     const [a, b] = [...pointers.values()];
     pinchDist = Math.hypot(a.x - b.x, a.y - b.y);
@@ -308,14 +353,17 @@ canvas.addEventListener('pointermove', (e) => {
     return;
   }
   if (paintFrom) { paintTo(e.clientX, e.clientY); pointers.set(e.pointerId, { x: e.clientX, y: e.clientY }); return; }
-  if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 6) dragging = true;
+  if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 6) { dragging = true; clearTimeout(holdTimer); }
   if (dragging) { renderer.follow = null; renderer.pan(e.clientX - prev.x, e.clientY - prev.y); }
   pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
 });
 canvas.addEventListener('pointerup', (e) => {
   pointers.delete(e.pointerId);
+  clearTimeout(holdTimer);
   if (paintFrom) { paintFrom = null; refresh(); return; }
   if (dragging || !s || e.button === 2) { if (!pointers.size) dragging = false; return; }
+  // a tap with a paving tool on a touch screen paves just the one tile
+  if (isRoadTool() && e.pointerType === 'touch') { paintFrom = null; paintTo(e.clientX, e.clientY); paintFrom = null; refresh(); return; }
   if (renderer.ghost) {
     const tile = renderer.toTile(e.clientX, e.clientY);
     const type = renderer.ghost;
@@ -329,7 +377,7 @@ canvas.addEventListener('pointerup', (e) => {
   }
   refresh();
 });
-canvas.addEventListener('pointercancel', (e) => pointers.delete(e.pointerId));
+canvas.addEventListener('pointercancel', (e) => { pointers.delete(e.pointerId); clearTimeout(holdTimer); paintFrom = null; });
 canvas.addEventListener('contextmenu', (e) => {
   e.preventDefault();
   renderer.ghost = null;

@@ -13,9 +13,14 @@ export const PROC: Record<string, [number, number, number]> = {
   blast: [0.05, 0.004, 0.25], evade: [0.04, 0.005, 0.3],
 };
 // per level: blade +atk, guard +def, vigor +hp, instinct +exp
-export const COMMON_PER: Record<string, number> = { blade: 0.006, guard: 0.006, vigor: 0.008, instinct: 0.004 };
+export const COMMON_PER: Record<string, number> = { blade: 0.006, guard: 0.006, vigor: 0.008, instinct: 0.004, eagleEye: 0.006, ironHide: 0.008, mistStep: 0.006, coldBlood: 0.01, sandStrike: 0.008 };
+// each village raises adventurers of a favourite class, who learn a skill of its own: [class, skill]
+export const SCHOOL: Record<string, [Cls, string]> = { maple: ['archer', 'eagleEye'], iron: ['knight', 'ironHide'], mist: ['mage', 'mistStep'], frost: ['lancer', 'coldBlood'], sun: ['rogue', 'sandStrike'] };
+// which stat each school skill lifts
+export const SCHOOL_STAT: Record<string, 'atk' | 'def' | 'hp' | 'exp'> = { eagleEye: 'atk', ironHide: 'def', mistStep: 'exp', coldBlood: 'hp', sandStrike: 'atk' };
+export const schoolMult = (n: Npc, stat: string) => (n.school && SCHOOL_STAT[n.school] === stat ? skillMult(n, n.school) : 1);
 
-export const skillsOf = (n: Npc) => [...COMMON_SKILLS, CLASS_SKILL[n.cls]];
+export const skillsOf = (n: Npc) => [...COMMON_SKILLS, CLASS_SKILL[n.cls], ...(n.school ? [n.school] : [])];
 export const slv = (n: Npc, k: string) => Math.floor(n.sk?.[k] ?? 0);
 export const procChance = (n: Npc, k: string) => {
   const p = PROC[k];

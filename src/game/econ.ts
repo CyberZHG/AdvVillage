@@ -1,7 +1,10 @@
+import { hasJob } from './jobs';
+import { boon } from './legacy';
 import { DAY, EXPANSIONS } from './constants';
 import { comboIncome, discoverCombos } from './combos';
-import { ROAD_COST, BUILDINGS, WONDER_STAGES, bldAvailable, finished, villageDef, wonderCost, EQUIP, EXPEDITIONS, ITEMS, equipByKey, shopTier, type Cost, type Slot } from './data';
-import { hasEffect, hotNow } from './events';
+import { ROAD_COST, BUILDINGS, WONDER_STAGES, bldAvailable, culture, finished, villageDef, wonderCost, wonderLevelMat, EQUIP, EXPEDITIONS, ITEMS, equipByKey, shopTier, type Cost, type Slot } from './data';
+import { festival, hasEffect, hotNow } from './events';
+import { villageFest } from './village';
 import { rbonus } from './research';
 import { LUCKY_BONUS, luckyAt } from './cat';
 import { lvMult } from './level';
@@ -13,7 +16,7 @@ import { MAP } from './constants';
 import type { Building, GameState, Score } from './types';
 
 export function earn(s: GameState, b: Building, amount: number) {
-  amount = Math.max(1, Math.round(amount * comboIncome(s, b) * (luckyAt(s, b.id) ? 1 + LUCKY_BONUS : 1)));
+  amount = Math.max(1, Math.round(amount * comboIncome(s, b) * (luckyAt(s, b.id) ? 1 + LUCKY_BONUS : 1) * boon('gold')));
   s.money += amount;
   s.stats.income += amount;
   s.stats.earned += amount;
@@ -62,12 +65,15 @@ export function canBuild(s: GameState, type: string): boolean {
   return hasCost(s, buildCost(s, type));
 }
 
+export const BUILD_TIME = 0.3 * DAY;
 export function build(s: GameState, type: string, x: number, y: number, pref = 0): boolean {
   const pl = placement(s, type, x, y, pref);
   if (!canBuild(s, type) || !pl) return false;
   payCost(s, buildCost(s, type));
   const b: Building = { id: newId(s), type, x, y, rot: pl.rot, door: pl.door, level: 1, exp: 0 };
   if (BUILDINGS[type].wonder) b.stage = 0;
+  // ordinary buildings take a little while to put up before they open
+  else b.ready = s.time + BUILD_TIME;
   s.buildings.push(b);
   s.nodes = s.nodes.filter((n) => !covers(b, n.x, n.y));
   invalidateGrid();
@@ -136,6 +142,15 @@ export function clearTerrain(s: GameState, x: number, y: number): boolean {
   const i = y * MAP + x, key = k === THICKET ? 'thicket' : k === BOG ? 'bog' : 'rock';
   s.terrain[key] = s.terrain[key].filter((j) => j !== i);
   if (c.gain) s.items[c.gain[0]] = (s.items[c.gain[0]] ?? 0) + c.gain[1];
+  // the groves of Chinese and Japanese villages are bamboo
+  if (k === THICKET && (culture.lang === 'zh' || culture.lang === 'ja')) { s.items.bamboo = (s.items.bamboo ?? 0) + 6; if (!s.disc.includes('bamboo')) s.disc.push('bamboo'); }
+  // now and then the cleared ground turns up an old ruin with something left in it
+  if (Math.random() < 0.08 && !s.buildings.some((b) => covers(b, x, y))) {
+    s.buildings.push({ id: newId(s), type: 'ruins', x, y, rot: 0, level: 1, exp: 0, door: null });
+    s.items.oldCoin = (s.items.oldCoin ?? 0) + 3; s.items.gem = (s.items.gem ?? 0) + 1;
+    invalidateGrid();
+    log(s, 'log.ruins');
+  }
   syncBounds(s);
   roadState.version++;
   return true;
@@ -162,14 +177,23 @@ export function priceAt(s: GameState, b: Building): number {
   const d = BUILDINGS[b.type];
   let p = d.price * lvMult(b.level) * (1 + rbonus(s, 'commerce'));
   if (d.kind === 'food') p *= 1 + rbonus(s, 'cuisine');
+  // festival dishes: mooncakes, zongzi, soba and sake sell dearer on Chinese and Japanese festival days
+  if (d.kind === 'food' && festival(s) && (culture.lang === 'zh' || culture.lang === 'ja')) p *= 1.15;
   if (hotNow(s, b.type)) p *= 1.25;
   return p;
 }
 
+// regional wonders also want a lore find for every level they rise
+export function canUpgrade(s: GameState, b: Building) {
+  const m = wonderLevelMat(b);
+  return hasCost(s, upgradeCost(s, b)) && (!m || (s.items[m[0]] ?? 0) >= m[1]);
+}
 export function upgrade(s: GameState, b: Building): boolean {
   const c = upgradeCost(s, b);
-  if (!hasCost(s, c)) return false;
+  if (!canUpgrade(s, b)) return false;
   payCost(s, c);
+  const m = wonderLevelMat(b);
+  if (m) s.items[m[0]] -= m[1];
   b.level++;
   log(s, 'log.bldUpgrade', { b: '@b.' + b.type, lv: b.level });
   return true;
@@ -209,7 +233,7 @@ export function expand(s: GameState): boolean {
 export function forgeCost(s: GameState, key: string) {
   const e = equipByKey(key)!;
   const L = s.wlv[key] ?? 0;
-  const m = mods(s).forgeCost * (hasEffect(s, 'smith') ? 0.5 : 1) * (1 - rbonus(s, 'smithing'));
+  const m = mods(s).forgeCost * (hasEffect(s, 'smith') ? 0.5 : 1) * (1 - rbonus(s, 'smithing')) * (villageFest(s) === 'forging' ? 0.7 : 1) * (hasJob(s, 'apprentice') ? 0.9 : 1) * boon('forge');
   return { money: Math.round(e.price * 0.3 * (1 + L) * m), mat: e.mat, count: Math.max(1, Math.round((2 + 2 * Math.floor(Math.sqrt(L))) * m)) };
 }
 
@@ -240,7 +264,7 @@ export function forgeable(s: GameState, slot: Slot): string[] {
 
 export function expeditionAvailable(s: GameState, key: string) {
   const d = EXPEDITIONS.find((e) => e.key === key);
-  return !!d && year(s) >= d.unlockYear && !s.exp;
+  return !!d && year(s) >= d.unlockYear && !s.exp && (!d.village || d.village === s.village);
 }
 
 export function launchExpedition(s: GameState, key: string): boolean {

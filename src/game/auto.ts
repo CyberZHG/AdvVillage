@@ -1,6 +1,7 @@
 import { MAP } from './constants';
 import { BUILDINGS, finished, wonderCost } from './data';
-import { advanceWonder, build, buildCost, canBuild, clearTerrain, expand, expansionCost, forgeCost, forgeUpgrade, forgeable, hasCost, placeRoad, roadCost, upgrade, upgradeCost } from './econ';
+import { advanceMega, canMega, megaCost } from './village';
+import { advanceWonder, build, buildCost, canBuild, clearTerrain, expand, expansionCost, forgeCost, forgeUpgrade, forgeable, hasCost, placeRoad, roadCost, upgrade, upgradeCost, canUpgrade } from './econ';
 import { freeBeds, log, residents } from './state';
 import { BOG, BRIDGE_MAX, ROCK, THICKET, VB, blocked, inVillage, isBridge, isRoad, isWater, placement, terrainAt } from './world';
 import { RESEARCH, canResearch, researchCost, startResearch } from './research';
@@ -30,10 +31,10 @@ export function autoDaily(s: GameState) {
       .sort((x, y) => x.c.money - y.c.money)[0];
     if (k) forgeUpgrade(s, k.k, 'village');
   }
-  if (a.build) { autoWonder(s, spare); autoBuild(s, spare); }
+  if (a.build) { autoWonder(s, spare); autoBuild(s, spare); if (canMega(s) && megaCost(s).money <= spare()) advanceMega(s); }
   if (a.upgrade) {
     const b = s.buildings.map((b) => ({ b, c: upgradeCost(s, b) }))
-      .filter(({ c }) => c.money <= spare() && hasCost(s, c))
+      .filter(({ b, c }) => c.money <= spare() && canUpgrade(s, b))
       .sort((x, y) => x.c.money - y.c.money)[0];
     if (b) upgrade(s, b.b);
   }
@@ -53,16 +54,32 @@ function autoWonder(s: GameState, spare: () => number) {
   const next = Object.keys(BUILDINGS).find((k) => BUILDINGS[k].wonder && canBuild(s, k) && buildCost(s, k).money <= spare());
   if (!next) return;
   let best: { x: number; y: number } | null = null, bd = Infinity;
-  for (let y = VB.min; y <= VB.max - 2; y++) for (let x = VB.min; x <= VB.max - 2; x++) {
+  const n = BUILDINGS[next].size;
+  for (let y = VB.min; y <= VB.max - n + 1; y++) for (let x = VB.min; x <= VB.max - n + 1; x++) {
     if (x + y < bd && placement(s, next, x, y)) { bd = x + y; best = { x, y }; }
   }
   if (best) build(s, next, best.x, best.y);
 }
 
-const once = () => Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].buildable !== false && k !== 'guild' && BUILDINGS[k].kind !== 'house' && !BUILDINGS[k].wonder)
+// a village's own kind of house (the marsh's stilt houses) counts as a kind to build once too
+const once = () => Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].buildable !== false && k !== 'guild' && (BUILDINGS[k].kind !== 'house' || !!BUILDINGS[k].village) && !BUILDINGS[k].wonder)
   .sort((a, b) => +(BUILDINGS[a].kind === 'decor') - +(BUILDINGS[b].kind === 'decor') || BUILDINGS[a].cost.money - BUILDINGS[b].cost.money);
 
+// first of all, a street runs straight through the village from each gate to the one facing it
+function gateRoads(s: GameState, spare: () => number): boolean {
+  const missing: [number, number][] = [];
+  for (let t = VB.min; t <= VB.max; t++) for (const [x, y] of [[32, t], [t, 32]] as const) if (!isRoad(x, y)) missing.push([x, y]);
+  let laid = false;
+  for (const [x, y] of missing) {
+    if (spare() < roadCost(x, y).money) break;
+    if (placeRoad(s, x, y)) laid = true;
+  }
+  return laid;
+}
+
 function autoBuild(s: GameState, spare: () => number) {
+  if (gateRoads(s, spare)) return;
+  if (branchRoads(s, spare)) return;
   const homeless = residents(s).some((n) => (n.role === 'fighter' || n.role === 'gatherer') && n.home == null);
   const want = homeless && freeBeds(s) <= 0 ? ['house'] : once().filter((k) => !s.buildings.some((b) => b.type === k));
   const types = want.filter((k) => canBuild(s, k) && buildCost(s, k).money <= spare());
@@ -72,9 +89,9 @@ function autoBuild(s: GameState, spare: () => number) {
     const spot = bestSpot(s, type);
     if (spot) { build(s, type, spot.x, spot.y); return; }
   }
-  if (types.every((k) => BUILDINGS[k].near)) return;
+  // terrain buildings with no lot beside their terrain need no new streets; widening the village may bring one in reach
   let laid = false;
-  for (let k = 0; k < 3 && spare() > 0; k++) { if (!extendRoads(s, spare)) break; laid = true; }
+  if (!types.every((k) => BUILDINGS[k].near)) for (let k = 0; k < 3 && spare() > 0; k++) { if (!extendRoads(s, spare)) break; laid = true; }
   // nowhere left to build or pave: widen the village once it can be afforded
   if (laid) return;
   // clear a few tiles of thicket or bog beside the streets before widening the village
@@ -120,9 +137,18 @@ function extendRoads(s: GameState, spare: () => number): boolean {
   }
   cands.sort((a, b) => a.d - b.d);
   for (const c of cands) {
+    const r = layRun(s, spare, c, 8);
+    if (r != null) return r;
+  }
+  return false;
+}
+// lays a straight street from (x, y) heading (dx, dy), up to max tiles, bridging narrow water; null if nothing could be
+// laid there, false if it could but cannot be afforded yet
+function layRun(s: GameState, spare: () => number, c: { x: number; y: number; dx: number; dy: number }, max: number): boolean | null {
+  {
     const plan: [number, number][] = [];
     let x = c.x, y = c.y;
-    while (plan.length < 8 && inVillage(x, y) && !isRoad(x, y)) {
+    while (plan.length < max && inVillage(x, y) && !isRoad(x, y)) {
       if (terrainAt(x, y) === ROCK || (blocked(s, x, y) && !isWater(x, y))) break;
       if (isWater(x, y)) {
         const span: [number, number][] = [];
@@ -139,13 +165,40 @@ function extendRoads(s: GameState, spare: () => number): boolean {
     }
     // a bridge must reach the far bank, so drop a run that ends on the water
     while (plan.length && isWater(...plan[plan.length - 1])) plan.pop();
-    if (!plan.length) continue;
+    if (!plan.length) return null;
     const cost = plan.reduce((a, [px, py]) => a + roadCost(px, py).money, 0);
     if (cost > spare() || !hasCost(s, { money: cost, wood: plan.reduce((a, [px, py]) => a + (roadCost(px, py).wood ?? 0), 0) })) return false;
     const bridged = plan.some(([px, py]) => isWater(px, py));
     for (const [px, py] of plan) placeRoad(s, px, py);
     if (bridged) log(s, 'log.autoBridge', {});
     return true;
+  }
+}
+
+// no street runs on for long without a turning: a straight stretch of more than MAX_RUN tiles with nothing branching off
+// it gets a side street at a grid point near its middle, so the village grows as blocks rather than one long cross
+const MAX_RUN = 7;
+function branchRoads(s: GameState, spare: () => number): boolean {
+  const runs: { tiles: [number, number][]; horiz: boolean }[] = [];
+  for (const horiz of [true, false]) for (let a = VB.min; a <= VB.max; a++) {
+    let run: [number, number][] = [];
+    const flush = () => { if (run.length > MAX_RUN) runs.push({ tiles: run, horiz }); run = []; };
+    for (let b = VB.min; b <= VB.max + 1; b++) {
+      const x = horiz ? b : a, y = horiz ? a : b;
+      const side = horiz ? isRoad(x, y - 1) || isRoad(x, y + 1) : isRoad(x - 1, y) || isRoad(x + 1, y);
+      if (b <= VB.max && isRoad(x, y) && !isWater(x, y) && !side) run.push([x, y]);
+      else { if (b <= VB.max && isRoad(x, y) && side && run.length) run.push([x, y]); flush(); }
+    }
+  }
+  runs.sort((p, q) => q.tiles.length - p.tiles.length);
+  for (const { tiles, horiz } of runs) {
+    const mid = (tiles.length - 1) / 2;
+    const spots = tiles.map((t, k) => ({ t, k })).filter(({ t }) => onGrid(horiz ? t[0] : t[1])).sort((p, q) => Math.abs(p.k - mid) - Math.abs(q.k - mid));
+    for (const { t: [x, y] } of spots) for (const sgn of y + x < 64 ? [1, -1] : [-1, 1]) {
+      const dx = horiz ? 0 : sgn, dy = horiz ? sgn : 0;
+      const r = layRun(s, spare, { x: x + dx, y: y + dy, dx, dy }, 4);
+      if (r != null) return r;
+    }
   }
   return false;
 }

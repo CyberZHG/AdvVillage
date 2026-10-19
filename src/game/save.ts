@@ -10,7 +10,7 @@ import { PROMOTE_LEVEL } from './constants';
 const KEY = 'advvillage.save.';
 const META = 'advvillage.meta';
 
-export interface Meta { unlocked: number; best: Record<string, number>; lang?: string; ach: Record<string, number>; crowd?: string }
+export interface Meta { unlocked: number; best: Record<string, number>; lang?: string; ach: Record<string, number>; crowd?: string; legacy?: { champs: string[]; finalHp: number; finalDown: boolean } }
 
 function storage(): Storage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; }
@@ -60,6 +60,44 @@ function restore(s: GameState): GameState {
     s.terrain.cave = (tr.cave ?? []).filter((i) => !busy.has(i));
     s.terrain.flowers = tr.flowers ?? [];
   }
+  if (!s.terrain.stream) { const busy = new Set([...(s.roads ?? []), ...s.buildings.map((b) => b.y * MAP + b.x)]); s.terrain.stream = (makeTerrain(s.village).stream ?? []).filter((i) => !busy.has(i)); }
+  if (!s.terrain.sea) {
+    // streams now join edge to edge; the coast, the gorge and the volcano's hot springs came later still
+    const tr = makeTerrain(s.village), busy = new Set([...(s.roads ?? []), ...s.buildings.map((b) => b.y * MAP + b.x)]);
+    s.terrain.stream = (tr.stream ?? []).filter((i) => !busy.has(i));
+    s.terrain.sea = tr.sea ?? []; s.terrain.beach = tr.beach ?? []; s.terrain.canyon = tr.canyon ?? [];
+    const water = new Set(s.terrain.water), rock = new Set(s.terrain.rock), vent = new Set(s.terrain.vent ?? []);
+    for (const i of s.terrain.sea) if (tr.water.includes(i)) water.add(i); else if (tr.rock.includes(i)) rock.add(i);
+    for (const i of tr.vent ?? []) if (!busy.has(i)) vent.add(i);
+    s.terrain.water = [...water]; s.terrain.rock = [...rock]; s.terrain.vent = [...vent];
+    const gone = new Set([...s.terrain.sea, ...s.terrain.canyon, ...vent]);
+    s.nodes = s.nodes.filter((n) => !gone.has(n.y * MAP + n.x));
+  }
+  if (!s.terrain.spring) {
+    // hot spring pools came later; they fill in wherever nothing stands
+    const busy = new Set([...(s.roads ?? []), ...s.buildings.flatMap((b) => { const n = BUILDINGS[b.type].size, o: number[] = []; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) o.push((b.y + j) * MAP + b.x + i); return o; })]);
+    s.terrain.spring = (makeTerrain(s.village).spring ?? []).filter((i) => !busy.has(i));
+    const gone = new Set(s.terrain.spring);
+    for (const k of ['rock', 'bog', 'thicket'] as const) s.terrain[k] = s.terrain[k].filter((i) => !gone.has(i));
+    s.nodes = s.nodes.filter((n) => !gone.has(n.y * MAP + n.x));
+  }
+  if (!s.terrain.battle) {
+    // mangroves, the stone forest, travertine terraces, the glacier, sinkholes, battlefields and the new bamboo
+    // stream came later; they settle wherever nothing stands
+    const busy = new Set([...(s.roads ?? []), ...s.buildings.flatMap((b) => { const n = BUILDINGS[b.type].size, o: number[] = []; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) o.push((b.y + j) * MAP + b.x + i); return o; })]);
+    const tr = makeTerrain(s.village), free = (l: number[] | undefined) => (l ?? []).filter((i) => !busy.has(i));
+    const added = [...free(tr.mangrove), ...free(tr.pillar), ...free(tr.glacier), ...free(tr.crevasse)];
+    s.terrain.mangrove = free(tr.mangrove); s.terrain.pillar = free(tr.pillar); s.terrain.glacier = free(tr.glacier); s.terrain.crevasse = free(tr.crevasse);
+    s.terrain.battle = tr.battle ?? [];
+    s.terrain.spring = [...new Set([...(s.terrain.spring ?? []), ...free(tr.spring)])];
+    s.terrain.stream = [...new Set([...(s.terrain.stream ?? []), ...free(tr.stream)])];
+    const gone = new Set([...added, ...s.terrain.spring, ...s.terrain.stream]);
+    for (const k of ['water', 'rock', 'bog', 'thicket'] as const) s.terrain[k] = s.terrain[k].filter((i) => !gone.has(i) || (k === 'water' && !added.includes(i) && !s.terrain!.spring!.includes(i)));
+    s.nodes = s.nodes.filter((n) => !gone.has(n.y * MAP + n.x));
+  }
+  // the gorge follows its definition, whatever an older save recorded
+  const wantCanyon = makeTerrain(s.village).canyon ?? [];
+  if (s.terrain.canyon?.length || wantCanyon.length) { s.terrain.canyon = wantCanyon; const gone = new Set(s.terrain.canyon); s.nodes = s.nodes.filter((n) => !gone.has(n.y * MAP + n.x)); }
   syncBounds(s);
   if (!s.roads) migrateRoads(s);
   syncBuried(s.buried);
@@ -136,6 +174,8 @@ function migrateMonstersAndLooks(s: GameState) {
     n.job = n.role === 'fighter' ? '' : randomJob(n.role);
     n.look = makeLook(n.role, n.cls, n.job);
   }
+  // the maid is no longer a trade: anyone who was one takes up another and dresses for it
+  for (const n of s.npcs) if (n.job === 'maid') { n.job = randomJob('civilian'); n.look = makeLook(n.role, n.cls, n.job); }
   for (const p of s.profiles) {
     if (p.look.outfit !== undefined) continue;
     p.job = randomJob('tourist');

@@ -1,12 +1,14 @@
 import type { ClassKey, NodeKind } from './data';
 
 export interface P { x: number; y: number }
-export interface Building { id: number; type: string; x: number; y: number; rot: number; level: number; exp: number; yi?: number; door?: P | null; goodsOff?: boolean; stage?: number }
+export interface Building { id: number; type: string; x: number; y: number; rot: number; level: number; exp: number; yi?: number; door?: P | null; goodsOff?: boolean; stage?: number; ready?: number }
 export interface ResNode { id: number; kind: NodeKind; x: number; y: number; amount: number; v: number; born?: number }
 export interface Monster {
   id: number; type: string; x: number; y: number; hp: number; tx: number; ty: number;
   target: number | null; cd: number; facing: 1 | -1; zone: number; wait: number;
   boss?: number; lv?: number; shiny?: boolean; until?: number; arr?: boolean; born?: number;
+  // a village champion (by village key) or the final boss ('final'), and its HP multiple over an ordinary boss
+  champ?: string; hpMul?: number; skillCd?: number; castT?: number;
 }
 
 export type Role = 'fighter' | 'gatherer' | 'civilian' | 'tourist';
@@ -14,7 +16,7 @@ export type Cls = ClassKey;
 export type NState = 'idle' | 'walk' | 'inside' | 'hunt' | 'fight' | 'gather' | 'down' | 'carried' | 'away' | 'wait';
 export type Goal =
   | 'eat' | 'shop' | 'forge' | 'fun' | 'rest' | 'sleep' | 'deposit' | 'quest' | 'expedition' | 'expWait'
-  | 'exitExp' | 'patrol' | 'fest' | 'camp' | 'homeStay' | 'gatherNode' | 'rescue' | 'dropoff' | 'visit' | 'leave';
+  | 'exitExp' | 'patrol' | 'fest' | 'camp' | 'homeStay' | 'gatherNode' | 'rescue' | 'dropoff' | 'visit' | 'leave' | 'cave' | 'hut';
 
 export interface Look {
   skin: number; hair: number; style: number; cloth: number; cloth2: number; pants: number;
@@ -33,12 +35,16 @@ export interface Npc {
   title?: string; titles?: string[]; fk?: Record<string, number>; partner?: number | null; spouse?: number | null;
   downs?: number; yk?: number; exps?: number; bosses?: number;
   rival?: number | null; bio?: LogEntry[]; vip?: string; promoted?: boolean; sk?: Record<string, number>; tired?: number; lead?: number;
+  // a fortune teller's good reading lasts until this time
+  luck?: number; luckK?: number;
+  // the village school this adventurer grew up in, by its skill
+  school?: string;
 }
 
 export interface Profile { name: number; job: string; look: Look; level: number; exp: number; visits: number }
 export interface Quest { id: number; type: string; need: number; done: number; reward: number; until: number; members: number[] }
 // tile indices per terrain kind
-export interface Terrain { water: number[]; rock: number[]; bog: number[]; thicket: number[]; vent?: number[]; cave?: number[]; flowers?: number[] }
+export interface Terrain { water: number[]; rock: number[]; bog: number[]; thicket: number[]; vent?: number[]; cave?: number[]; flowers?: number[]; stream?: number[]; sea?: number[]; beach?: number[]; canyon?: number[]; spring?: number[]; mangrove?: number[]; pillar?: number[]; glacier?: number[]; crevasse?: number[]; battle?: number[] }
 export interface Expedition {
   loc: string; state: 'recruit' | 'depart' | 'away'; members: number[]; until: number;
   wins: number; losses: number; loot: Record<string, number>; nextDay: number;
@@ -46,7 +52,7 @@ export interface Expedition {
 }
 export type LogParam = string | number;
 export interface LogEntry { t: number; k: string; p?: Record<string, LogParam> }
-export interface Fx { kind: 'coin' | 'dmg' | 'lvl' | 'item' | 'score' | 'emote' | 'skill'; x: number; y: number; v: string | number }
+export interface Fx { kind: 'coin' | 'dmg' | 'lvl' | 'item' | 'score' | 'emote' | 'skill' | 'boss'; x: number; y: number; v: string | number; tx?: number; ty?: number; m?: string; f?: number }
 export interface Score { npcs: number; buildings: number; npcLevels: number; bldLevels: number; fame: number; total: number; rank: string }
 
 export interface Effect { k: string; until: number }
@@ -82,7 +88,11 @@ export interface GameState {
   buildings: Building[]; nodes: ResNode[]; monsters: Monster[]; npcs: Npc[]; profiles: Profile[];
   quests: Quest[]; exp: Expedition | null; expLast?: number; terrain?: Terrain; rstyle?: Record<number, number>;
   // village mechanics: ore vein richness, river boat in transit, roads buried by sand, and per-village tallies
-  vein?: number; boatUntil?: number; buried?: { i: number; until: number }[]; vstat?: Record<string, number>;
+  vein?: number; boatUntil?: number; snow?: number;
+  // the village megaproject's stage (0..MEGA_STAGES), and the current disaster with where it struck
+  mega?: number; disaster?: { k: string; until: number; x: number; y: number; saved?: boolean } | null; buried?: { i: number; until: number }[]; vstat?: Record<string, number>;
+  // village storyline progress and trade caravans on the road to other villages
+  vquest?: number; trades?: { to: string; until: number; item: string; count: number }[];
   mlv: Record<string, { level: number; exp: number }>;
   wlv: Record<string, number>;
   disc: string[]; seen: string[];

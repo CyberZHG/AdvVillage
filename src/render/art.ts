@@ -1,49 +1,69 @@
+import { culture } from '../game/data';
 import type { Ground, NodeKind } from '../game/data';
 import type { Cls, Look, Role } from '../game/types';
 import { makeCanvas } from './pixel';
-import { PAX, PAY, PH, PW, compose, layerNames, lookColors, type Layer } from './compose';
+import { BOB_FRAMES, PAX, PAY, PH, PW, bob, compose, layerNames, lookColors, type Layer } from './compose';
 
 export interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number; fx?: number[][]; tint?: string }
 export interface Sprite extends Frame { img: CanvasImageSource }
 
-export type TileKind = 'wild0' | 'wild1' | 'wild2' | 'village' | 'road' | 'street' | 'st1' | 'st2' | 'st3' | 'st4' | 'st5' | 'water' | 'ice' | 'bog' | 'bridgeX' | 'bridgeY' | 'sbridgeX' | 'sbridgeY' | 'vent';
+export type TileKind = 'wild0' | 'wild1' | 'wild2' | 'village' | 'road' | 'street' | 'st1' | 'st2' | 'st3' | 'st4' | 'st5' | 'water' | 'ice' | 'bog' | 'bridgeX' | 'bridgeY' | 'sbridgeX' | 'sbridgeY' | 'vent' | 'sand' | 'sea' | 'lava' | 'snowtop' | 'ash' | 'gorge' | 'litter' | 'paddy0' | 'paddy1' | 'paddy2' | 'paddy3' | 'spring' | 'glacier' | 'mud' | 'oasis' | 'trav';
 export const TILE_H = 22;
 
-let sheet: HTMLImageElement;
-let flippedSheet: HTMLCanvasElement;
-let frames: Record<string, Frame> = {};
-let sheetW = 0;
+// sprites live on several sheets by purpose; each keeps its pixels for recolouring and a mirrored copy for flips
+interface Sheet { img: HTMLImageElement; flipped: HTMLCanvasElement; pixels: Uint8ClampedArray; w: number }
+let sheets: Sheet[] = [];
+let frames: Record<string, Frame & { s: number }> = {};
+
+const loadImage = (src: string) => new Promise<HTMLImageElement>((ok, fail) => {
+  const i = new Image();
+  i.onload = () => ok(i);
+  i.onerror = fail;
+  i.src = src;
+});
 
 export async function loadArt(base = './assets/') {
-  const [img, json] = await Promise.all([
-    new Promise<HTMLImageElement>((ok, fail) => {
-      const i = new Image();
-      i.onload = () => ok(i);
-      i.onerror = fail;
-      i.src = base + 'sprites.png';
-    }),
-    fetch(base + 'sprites.json').then((r) => r.json()),
-  ]);
-  sheet = img;
-  frames = json.frames;
-  sheetW = json.w;
-  const raw = makeCanvas(img.width, img.height);
-  const rctx = raw.getContext('2d', { willReadFrequently: true })!;
-  rctx.drawImage(img, 0, 0);
-  sheetPixels = rctx.getImageData(0, 0, img.width, img.height).data;
-  flippedSheet = makeCanvas(img.width, img.height);
-  const ctx = flippedSheet.getContext('2d')!;
-  ctx.scale(-1, 1);
-  ctx.drawImage(img, -img.width, 0);
+  const index: { sheets: { name: string }[]; frames: typeof frames } = await fetch(base + 'sprites.json').then((r) => r.json());
+  const imgs = await Promise.all(index.sheets.map((sh) => loadImage(`${base}sprites/${sh.name}.png`)));
+  frames = index.frames;
+  sheets = imgs.map((img) => {
+    const raw = makeCanvas(img.width, img.height);
+    const rctx = raw.getContext('2d', { willReadFrequently: true })!;
+    rctx.drawImage(img, 0, 0);
+    const flipped = makeCanvas(img.width, img.height);
+    const ctx = flipped.getContext('2d')!;
+    ctx.scale(-1, 1);
+    ctx.drawImage(img, -img.width, 0);
+    return { img, flipped, pixels: rctx.getImageData(0, 0, img.width, img.height).data, w: img.width };
+  });
 }
 
-const MISSING: Frame = { x: 0, y: 0, w: 1, h: 1, ax: 0, ay: 0 };
+// centres of the lit-window clusters in a glow sprite, found once from its pixels
+const spotCache = new Map<string, [number, number][]>();
+export function litSpots(sp: Sprite): [number, number][] {
+  const key = `${sp.x},${sp.y},${sp.w},${sp.h},${sheets.findIndex((sh) => sh.flipped === sp.img)}`;
+  let out = spotCache.get(key);
+  if (out) return out;
+  const c = makeCanvas(sp.w, sp.h), g = c.getContext('2d', { willReadFrequently: true })!;
+  g.drawImage(sp.img, sp.x, sp.y, sp.w, sp.h, 0, 0, sp.w, sp.h);
+  const d = g.getImageData(0, 0, sp.w, sp.h).data, cells = new Map<number, [number, number, number]>();
+  for (let y = 0; y < sp.h; y++) for (let x = 0; x < sp.w; x++) {
+    if (d[(y * sp.w + x) * 4 + 3] < 128) continue;
+    const k = Math.floor(y / 6) * 1000 + Math.floor(x / 6), e = cells.get(k) ?? [0, 0, 0];
+    e[0] += x; e[1] += y; e[2]++; cells.set(k, e);
+  }
+  out = [...cells.values()].filter((e) => e[2] >= 4).map((e) => [Math.round(e[0] / e[2]), Math.round(e[1] / e[2])] as [number, number]);
+  spotCache.set(key, out);
+  return out;
+}
+
+const MISSING: Frame & { s: number } = { x: 0, y: 0, w: 1, h: 1, ax: 0, ay: 0, s: 0 };
 
 function get(name: string, flip = false): Sprite {
-  const f = frames[name] ?? MISSING;
-  if (!flip) return { img: sheet, ...f };
+  const { s, ...f } = frames[name] ?? MISSING, sh = sheets[s];
+  if (!flip) return { img: sh.img, ...f };
   // odd widths anchor on a pixel centre, even widths on the boundary between two pixels
-  return { img: flippedSheet, x: sheetW - f.x - f.w, y: f.y, w: f.w, h: f.h, ax: f.w - f.ax - (f.w % 2), ay: f.ay, fx: f.fx?.map(([dx, ...rest]) => [-dx, ...rest]) };
+  return { img: sh.flipped, x: sh.w - f.x - f.w, y: f.y, w: f.w, h: f.h, ax: f.w - f.ax - (f.w % 2), ay: f.ay, fx: f.fx?.map(([dx, ...rest]) => [-dx, ...rest]) };
 }
 
 export function draw(ctx: CanvasRenderingContext2D, s: Sprite, px: number, py: number) {
@@ -58,6 +78,8 @@ export const nodeSprite = (kind: NodeKind, v: number, g: Ground) => get(`node/${
 export const propSprite = (name: string, g: Ground) => get(`prop/${name}/${g}`);
 export const localTreeSprite = (kind: string, se: number) => get(`tree/${kind}/${se}`);
 export const bankSprite = (g: Ground, tag: string, d: number, v: number) => get(`bank/${g}/${tag}/${d}/${v % 2}`);
+// nine-patch edges: grass over beach sand, ground over a lava flow
+export const edgeSprite = (g: Ground, kind: 'edge' | 'ledge' | 'sedge' | 'aedge' | 'bedge' | 'redge' | 'tedge' | 'zedge' | 'pedge' | 'hedge', tag: string, d: number, v: number) => get(`${kind}/${g}/${tag}/${d}/${v % 2}`);
 export const rampSprite = (g: Ground, tag: string, d: number) => get(`ramp/${g}/${tag}/${d}`);
 export const cliffSprite = (g: Ground, v: number) => get(`cliff/${g}/${v}`);
 export const fallSprite = (g: Ground, v: number) => get(`cliff/${g}/fall${v}`);
@@ -67,19 +89,20 @@ export const catSprite = (coat: string, frame: string, flip: boolean) => get(`ca
 export const catNeck = (frame: string): [number, number] => (frames[`cat/orange/${frame}`] as Frame & { neck?: [number, number] })?.neck ?? [8, 9];
 export const catIcon = (coat = 'orange') => iconOf(`cat/${coat}/sit0`);
 export const monsterSprite = (type: string, frame: number, flip: boolean) => get(`m/${type}/${frame}`, flip);
+// the newer detailed creatures have four frames, the classic ones two
+export const monsterFrames = (type: string) => (frames[`m/${type}/7`] ? 8 : frames[`m/${type}/3`] ? 4 : 2);
 
-let sheetPixels: Uint8ClampedArray | null = null;
 const layerCache = new Map<string, Layer | null>();
 
 function layer(name: string): Layer | null {
   if (layerCache.has(name)) return layerCache.get(name)!;
   const f = frames[name];
   let l: Layer | null = null;
-  if (f && sheetPixels) {
-    const data = new Uint8ClampedArray(PW * PH * 4);
+  if (f) {
+    const { pixels, w } = sheets[f.s], data = new Uint8ClampedArray(PW * PH * 4);
     for (let y = 0; y < PH; y++) {
-      const src = ((f.y + y) * sheetW + f.x) * 4;
-      data.set(sheetPixels.subarray(src, src + PW * 4), y * PW * 4);
+      const src = ((f.y + y) * w + f.x) * 4;
+      data.set(pixels.subarray(src, src + PW * 4), y * PW * 4);
     }
     l = { data, tint: (f.tint as Layer['tint']) ?? '' };
   }
@@ -94,11 +117,17 @@ const lookKey = (l: Look, frame: number) =>
 function humanCanvas(look: Look, frame: number): HTMLCanvasElement {
   const layers = layerNames(look, frame).map(layer).filter((l): l is Layer => !!l);
   const c = makeCanvas(PW, PH);
-  c.getContext('2d')!.putImageData(new ImageData(new Uint8ClampedArray(compose(layers, lookColors(look))), PW, PH), 0, 0);
+  const px = new Uint8ClampedArray(compose(layers, lookColors(look)));
+  if (BOB_FRAMES.includes(frame)) bob(px);
+  c.getContext('2d')!.putImageData(new ImageData(px, PW, PH), 0, 0);
   return c;
 }
 
-export function humanSprite(_role: Role, _cls: Cls, look: Look, frame: number, flip: boolean): Sprite {
+export const EAST_ASIAN_SKIN = 5;
+// adventurers share one cool East Asian complexion when the game is in Chinese, Japanese or Korean
+const asian = () => culture.lang === 'zh' || culture.lang === 'ja' || culture.lang === 'ko';
+export function humanSprite(role: Role, _cls: Cls, look: Look, frame: number, flip: boolean): Sprite {
+  if (role === 'fighter' && asian() && look.skin !== EAST_ASIAN_SKIN) look = { ...look, skin: EAST_ASIAN_SKIN };
   const key = lookKey(look, frame) + (flip ? 'f' : '');
   let sp = humanCache.get(key);
   if (!sp) {
@@ -154,6 +183,7 @@ export const uiSprite = (name: string) => get(`ui/${name}`);
 export const tileIcon = (g: string, style: number) => iconOf(`tile/${g}/${style ? 'st' + style : 'street'}/0`);
 const humanIcons = new Map<string, string>();
 export function humanIcon(role: Role, cls: Cls, look: Look): string {
+  if (role === 'fighter' && asian()) look = { ...look, skin: EAST_ASIAN_SKIN };
   const key = lookKey(look, 0);
   let url = humanIcons.get(key);
   if (!url) { url = (humanSprite(role, cls, look, 0, false).img as HTMLCanvasElement).toDataURL(); humanIcons.set(key, url); }
@@ -195,7 +225,9 @@ function recolor(r: number, g: number, b: number, se: number, leaf: boolean, ton
 const seasonCache = new Map<string, Sprite>();
 export function seasonal(sp: Sprite, se: number, leaf: boolean): Sprite {
   if (se !== 2 && se !== 3) return sp;
-  if (sp.img !== sheet || !sheetPixels) return sp;
+  const sheet = sheets.find((sh) => sh.img === sp.img);
+  if (!sheet) return sp;
+  const sheetPixels = sheet.pixels;
   const key = `${sp.x},${sp.y},${sp.w},${sp.h},${se},${leaf ? 1 : 0}`;
   let out = seasonCache.get(key);
   if (!out) {
@@ -205,7 +237,7 @@ export function seasonal(sp: Sprite, se: number, leaf: boolean): Sprite {
     const tone = (sp.x * 7 + sp.y * 13) >> 3;
     for (let y = 0; y < sp.h; y++) {
       for (let x = 0; x < sp.w; x++) {
-        const i = ((sp.y + y) * sheet.width + sp.x + x) * 4, o = (y * sp.w + x) * 4;
+        const i = ((sp.y + y) * sheet.w + sp.x + x) * 4, o = (y * sp.w + x) * 4;
         const a = sheetPixels[i + 3];
         if (!a) continue;
         const v = recolor(sheetPixels[i], sheetPixels[i + 1], sheetPixels[i + 2], se, leaf, tone);

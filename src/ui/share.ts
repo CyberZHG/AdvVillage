@@ -3,7 +3,11 @@ import { ACHIEVEMENTS } from '../game/achievements';
 import { computeScore } from '../game/econ';
 import { residents } from '../game/state';
 import { makeCanvas } from '../render/pixel';
-import { uiSprite } from '../render/art';
+import { buildingSprite } from '../render/art';
+import { BUILDINGS } from '../game/data';
+import { season } from '../game/events';
+import { monsterSprite, uiSprite } from '../render/art';
+import { CHAMPION, FINAL, legacy } from '../game/legacy';
 import type { GameState } from '../game/types';
 import type { Meta } from '../game/save';
 import { dateText } from './ui';
@@ -44,6 +48,21 @@ export async function makeShareImage(s: GameState, meta: Meta, view: HTMLCanvasE
   };
 
   text(t('game.title'), 40, 70, 52, '#ffd34a');
+  // trophies: the village champions beaten so far, and the World Eater once it has fallen, as small portraits top right
+  const beaten = [...Object.entries(CHAMPION).filter(([v]) => legacy.champs.includes(v)).map(([, type]) => type), ...(legacy.finalDown ? [FINAL] : [])];
+  if (beaten.length) {
+    let x = W - 36;
+    ctx.imageSmoothingEnabled = false;
+    for (const type of [...beaten].reverse()) {
+      const sp = monsterSprite(type, 0, false), k = (type === FINAL ? 76 : 60) / sp.h, w = Math.round(sp.w * k), h = Math.round(sp.h * k);
+      x -= w;
+      const bg = ctx.createLinearGradient(0, 24, 0, 110); bg.addColorStop(0, '#26305e'); bg.addColorStop(1, '#141a3a'); ctx.fillStyle = bg; ctx.fillRect(x - 4, 24, w + 8, 86);
+      ctx.strokeStyle = type === FINAL ? '#c890ff' : '#ffd34a'; ctx.lineWidth = 2; ctx.strokeRect(x - 4, 24, w + 8, 86);
+      ctx.drawImage(sp.img, sp.x, sp.y, sp.w, sp.h, x, 104 - h, w, h);
+      x -= 14;
+    }
+    text(t('ui.beaten'), W - 36, 132, 20, '#ffd34a', 'right');
+  }
   text(`${t(`village.${s.village}.name`)} · ${dateText(s)}`, 40, 112, 26, '#fbf6e6');
 
   const stats: [string, string][] = [
@@ -115,5 +134,33 @@ export async function makeReportImage(s: GameState, i: number): Promise<HTMLCanv
   for (const e of r.events.slice(-4)) { text('・' + t(e.k, e.p), 60, y, 20, '#5a4a30'); y += 32; }
   text(shareUrl(), W - 40, H - 30, 22, '#3a6a9a', 'right');
   ctx.strokeStyle = '#3a2a1a'; ctx.lineWidth = 4; ctx.strokeRect(14, 14, W - 28, H - 28);
+  return c;
+}
+
+// a postcard of the village for its evaluation: the sky of the season, its name, and its finest buildings
+export function makePostcard(s: GameState): HTMLCanvasElement {
+  const W = 480, H = 320, c = makeCanvas(W, H), ctx = c.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  const se = season(s);
+  const skies = [['#9ad0f0', '#ffe0ec'], ['#5aa8e8', '#c8ecff'], ['#e8a060', '#f8e0b0'], ['#8aa8c8', '#e8eef8']][se];
+  const g = ctx.createLinearGradient(0, 0, 0, H); g.addColorStop(0, skies[0]); g.addColorStop(1, skies[1]);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = ['#7ac85a', '#5aa83a', '#c89a4a', '#eef2f8'][se]; ctx.fillRect(0, 230, W, 90);
+  // the village's best: wonders first, then whatever draws the most visitors
+  const best = [...s.buildings].filter((b) => BUILDINGS[b.type].kind !== 'house' && b.type !== 'guild')
+    .sort((a, b) => +!!BUILDINGS[b.type].wonder - +!!BUILDINGS[a.type].wonder || BUILDINGS[b.type].attraction * b.level - BUILDINGS[a.type].attraction * a.level).slice(0, 5);
+  const shown = [s.buildings.find((b) => b.type === 'guild')!, ...best].filter(Boolean);
+  shown.forEach((b, i) => {
+    const sp = buildingSprite(b.type), k = BUILDINGS[b.type].size >= 4 ? 1 : 2;
+    const x = 50 + i * ((W - 100) / Math.max(1, shown.length - 1)), y = 250;
+    ctx.drawImage(sp.img, sp.x, sp.y, sp.w, sp.h, Math.round(x - sp.ax * k), Math.round(y - sp.ay * k), sp.w * k, sp.h * k);
+  });
+  ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(20, 18, W - 40, 58);
+  ctx.strokeStyle = '#c83a2a'; ctx.lineWidth = 3; ctx.strokeRect(20, 18, W - 40, 58);
+  ctx.fillStyle = '#2a1a10'; ctx.font = '28px "DotGothic16", monospace'; ctx.textAlign = 'center';
+  ctx.fillText(t(`village.${s.village}.name`), W / 2, 50);
+  ctx.font = '14px "DotGothic16", monospace';
+  ctx.fillText(t('ui.postcardLine', { y: Math.floor(s.day / 120) + 1, r: s.score?.rank ?? computeScore(s).rank }), W / 2, 68);
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 8; ctx.strokeRect(4, 4, W - 8, H - 8);
   return c;
 }

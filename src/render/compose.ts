@@ -13,7 +13,8 @@ export const PAY = 21;
 export const GRAY_BASE = 196;
 
 export const PALETTE = {
-  skin: ['#f6d2ae', '#ecbf94', '#d9a173', '#b07a52', '#7a5034'],
+  // the last entry is a cool-toned East Asian complexion used for adventurers in Chinese, Japanese and Korean
+  skin: ['#f6d2ae', '#ecbf94', '#d9a173', '#b07a52', '#7a5034', '#f2d6c6'],
   hair: ['#6a4026', '#2e2a30', '#d8b048', '#b24a2a', '#e4dcd0', '#4a5ab0', '#3a2418', '#a4a4ae', '#d87aa0', '#4a8a5a'],
   cloth: ['#b83a3a', '#c0602a', '#d8b040', '#5a9a3a', '#2a7a6a', '#3a6ab8', '#4a4ab8', '#7a3aa8', '#a83a7a', '#8a6a3a', '#e8e0d0', '#4a4a5a', '#d87a8a', '#6ab0d8'],
   pants: ['#4a4a6a', '#5a4a30', '#3a3a3a', '#6a5a4a', '#2a3a5a', '#7a6a5a'],
@@ -79,13 +80,28 @@ export const lookColors = (l: LookColors): Record<Channel, RGB> => ({
 
 export const HAIR_STYLES = 8;
 
+// lift everything above the legs by one pixel (passing frames of the walk), keeping the waist joined
+export function bob(px: Uint8ClampedArray, w = PW, cut = 18) {
+  for (let y = 0; y < cut - 1; y++) px.copyWithin(y * w * 4, (y + 1) * w * 4, (y + 2) * w * 4);
+}
+
 // draw order of the layer groups
+// frames: 0 stand, 1 3 4 5 walk cycle, 2 strike, 6 blink, 7 sit, 8 arms up (cast or cheer), 9 stretch,
+// 10 hand to head, 11 hands rubbed together, 12 a kick
+export const FRAME = { stand: 0, strike: 2, blink: 6, sit: 7, up: 8, stretch: 9, head: 10, rub: 11, kick: 12, walk: [1, 3, 4, 5] };
+// passing frames of the walk lift the body by a pixel
+export const BOB_FRAMES = [3, 5];
+const LEGS: Record<number, string> = { 0: '0', 1: 'w0', 2: '2', 3: 'w1', 4: 'w2', 5: 'w3', 6: '0', 7: 'sit', 8: '0', 9: '0', 10: '0', 11: '0', 12: 'kick' };
+const ARM: Record<number, string> = { 0: 'down', 1: 'fwd', 2: 'reach', 3: 'down', 4: 'back', 5: 'down', 6: 'down', 7: 'lap', 8: 'up', 9: 'up', 10: 'head', 11: 'rub', 12: 'back' };
+
 export function layerNames(o: { outfit: string; head: string; beard: string; item: string; style: number; ears?: boolean; face?: string; cape?: boolean }, frame: number): string[] {
   const cape = o.cape ? ['p/cape/x'] : [], clasp = o.cape ? ['p/capeA/x'] : [];
-  const names = [...cape, `p/back/${o.item}`, `p/legs/${frame}`, `p/outfit/${o.outfit}`, `p/outfitA/${o.outfit}`, ...clasp, `p/skin/${o.face ?? 'human'}`];
+  const blink = frame === 6 || frame === 9;
+  const face = o.face ?? 'human';
+  const names = [...cape, `p/back/${o.item}`, `p/legs/${LEGS[frame] ?? frame}`, `p/outfit/${o.outfit}`, `p/outfitA/${o.outfit}`, `p/arm/${ARM[frame] ?? 'down'}`, ...clasp, `p/hand/${ARM[frame] ?? 'down'}`, blink && (face === 'human' || face === 'orc') ? `p/blink/${face}` : `p/skin/${face}`];
   if (o.ears) names.push('p/ears/x');
   if (o.beard) names.push(`p/beard/${o.beard}`);
-  if (!['knightHelm', 'hood', 'mitre'].includes(o.head) || o.style === 2) names.push(`p/hair/${o.style}`);
+  if (!['knightHelm', 'hood', 'mitre', 'ninjaHood'].includes(o.head) || o.style === 2) names.push(`p/hair/${o.style}`);
   if (o.head) names.push(`p/head/${o.head}`);
   names.push(frame === 2 ? `p/itemA/${o.item}` : `p/item/${o.item}`);
   return names;
