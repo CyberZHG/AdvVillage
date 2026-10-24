@@ -106,10 +106,17 @@ export function mountHud() {
 const TABS: Tab[] = ['build', 'facilities', 'residents', 'guild', 'bestiary', 'achievements', 'forge', 'research', 'storage', 'tourists', 'village', 'settings'];
 
 let lastHtml: Record<string, string> = {};
-function setHtml(id: string, html: string) {
+const lastKey: Record<string, string> = {};
+// a window that redraws while showing the same thing (key) keeps its scroll positions
+function setHtml(id: string, html: string, key?: string) {
   if (lastHtml[id] === html) return;
   lastHtml[id] = html;
-  $(id).innerHTML = html;
+  const el = $(id);
+  const same = key != null && lastKey[id] === key;
+  if (key != null) lastKey[id] = key;
+  const tops = same ? [...el.querySelectorAll('.win-body, .bio')].map((e) => e.scrollTop) : [];
+  el.innerHTML = html;
+  if (tops.length) el.querySelectorAll('.win-body, .bio').forEach((e, i) => { if (tops[i] != null) e.scrollTop = tops[i]; });
 }
 export function resetHtmlCache() { lastHtml = {}; }
 
@@ -161,7 +168,7 @@ export function updateHud(c: Ctl, tab: Tab | null) {
   const info = $('info');
   const infoHtml = c.selected ? infoCard(c) : '';
   info.classList.toggle('hidden', !infoHtml);
-  if (infoHtml) setHtml('info', infoHtml);
+  if (infoHtml) setHtml('info', infoHtml, JSON.stringify(c.selected));
 }
 
 // ---------------- panels ----------------
@@ -314,10 +321,11 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     if (!s.buildings.some((b) => b.type === 'forge')) return `<p>${t('ui.needForge')}</p>`;
     const slots: Slot[] = ['weapon', 'armor', 'accessory'];
     const stat = (k: string, L: number) => {
-      const e = equipByKey(k)!, f = forgeMult(L), parts: string[] = [];
-      if (e.atk) parts.push(`${t('ui.atk')} ${e.atk} → ${(e.atk * f).toFixed(1)}`);
-      if (e.def) parts.push(`${t('ui.def')} ${e.def} → ${(e.def * f).toFixed(1)}`);
-      if (e.hp) parts.push(`HP ${e.hp} → ${Math.round(e.hp * f)}`);
+      // what the gear gives now and after one more forging
+      const e = equipByKey(k)!, f = forgeMult(L), g = forgeMult(L + 1), parts: string[] = [];
+      if (e.atk) parts.push(`${t('ui.atk')} ${(e.atk * f).toFixed(1)} → ${(e.atk * g).toFixed(1)}`);
+      if (e.def) parts.push(`${t('ui.def')} ${(e.def * f).toFixed(1)} → ${(e.def * g).toFixed(1)}`);
+      if (e.hp) parts.push(`HP ${Math.round(e.hp * f)} → ${Math.round(e.hp * g)}`);
       return parts.join(' · ');
     };
     return `<p class="meta">${t('ui.forgeHint')}</p>${effectTag(s, 'smith')}<div class="btns">${btn('auto:forge', t('auto.forge'), { cls: s.auto.forge ? 'on' : '' })}</div><div class="btns">${slots.map((k) => btn('forgeSlot:' + k, t('slot.' + k), { cls: forgeSlot === k ? 'on' : '' })).join('')}</div>` +
@@ -347,7 +355,9 @@ const PANELS: Record<Tab, (c: Ctl) => string> = {
     return h + RESEARCH.map((d) => {
       const L = rlv(s, d.key), max = L >= d.max;
       const rc = researchCost(s, d.key), have = s.items[rc.mat] ?? 0;
-      const eff = t('rse.' + d.key, { p: Math.round(d.per * 100 * L * 10) / 10, n: Math.round(d.per * 100 * (L + 1) * 10) / 10 });
+      // current effect, and what the next level brings unless this line is finished
+      const pct = (l: number) => `${d.cut ? '−' : '+'}${Math.round(d.per * 100 * l * 10) / 10}%`;
+      const eff = t('rse.' + d.key, { p: max ? pct(L) : `${pct(L)} → ${pct(L + 1)}` });
       return `<div class="row ${r?.k === d.key ? 'on' : ''}"><span class="grow"><b>${t('rs.' + d.key)}</b> ${t('ui.lv', { lv: L })}/${d.max}
         <br><small>${eff}</small>
         ${max ? '' : `<br>${money(rc.money, s.money >= rc.money)} <span class="cost ${have >= rc.count ? '' : 'bad'}">${img(itemIcon(rc.mat))}${s.disc.includes(rc.mat) ? t('item.' + rc.mat) : t('ui.unknown')} ${fmt(have)}/${fmt(rc.count)}</span> <small>${t('ui.days', { n: rc.days })}</small>`}</span>
@@ -575,7 +585,8 @@ function buildingBody(c: Ctl, b: Building): string {
   const uc = upgradeCost(s, b);
   const um = wonderLevelMat(b);
   const umHtml = um ? ` <span class="tag">${img(itemIcon(um[0]))}${t('item.' + um[0])} ${fmt(s.items[um[0]] ?? 0)}/${um[1]}</span>` : '';
-  h += `<div class="row"><span class="grow">${t('ui.upgradeTo', { lv: b.level + 1 })}<br>${costHtml(s, uc)}${umHtml}</span>${btn('upgrade:' + b.id, t('ui.upgrade'), { disabled: !canUpgrade(s, b) })}</div>`;
+  const gain = `${t('ui.bonus')} ×${lvMult(b.level).toFixed(2)} → ×${lvMult(b.level + 1).toFixed(2)}`;
+  h += `<div class="row"><span class="grow">${t('ui.upgradeTo', { lv: b.level + 1 })} <small>${gain}</small><br>${costHtml(s, uc)}${umHtml}</span>${btn('upgrade:' + b.id, t('ui.upgrade'), { disabled: !canUpgrade(s, b) })}</div>`;
   if (b.type !== 'guild') h += `<div class="btns right">${btn('demolish:' + b.id, pendingDemolish === b.id ? t('ui.confirmDemolish') : t('ui.demolish'), { cls: 'danger' })}</div>`;
   return `<div class="win-body">${h}</div>`;
 }

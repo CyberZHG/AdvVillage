@@ -2,7 +2,7 @@ import { DAY } from './constants';
 import { log, note } from './state';
 import type { GameState } from './types';
 
-export interface ResearchDef { key: string; mats: string[]; max: number; per: number }
+export interface ResearchDef { key: string; mats: string[]; max: number; per: number; cut?: boolean }
 
 // per = effect gained per level; costs climb steeply so late-game money has somewhere to go.
 // each line accepts several materials so every village can progress whatever its monsters drop
@@ -15,8 +15,8 @@ export const RESEARCH: ResearchDef[] = [
   { key: 'tactics', mats: ['stinger', 'venom', 'scale'], max: 15, per: 0.03 },
   { key: 'medicine', mats: ['slimeCore', 'gel', 'ecto'], max: 15, per: 0.1 },
   { key: 'logistics', mats: ['snakeskin', 'cloth', 'bone'], max: 15, per: 0.04 },
-  { key: 'smithing', mats: ['silverOre', 'iron', 'goldOre'], max: 10, per: 0.05 },
-  { key: 'architecture', mats: ['golemCore', 'crystal', 'dust'], max: 10, per: 0.04 },
+  { key: 'smithing', mats: ['silverOre', 'iron', 'goldOre'], max: 10, per: 0.05, cut: true },
+  { key: 'architecture', mats: ['golemCore', 'crystal', 'dust'], max: 10, per: 0.04, cut: true },
 ];
 export const QUEUE_MAX = 3;
 

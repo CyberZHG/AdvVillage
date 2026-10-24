@@ -42,7 +42,9 @@ export function autoDaily(s: GameState) {
 
 // ---------- auto build ----------
 // every kind of building once, businesses first and cheapest first within each group, plus another house whenever workers have nowhere to sleep.
-// when no lot is free the builder extends the street grid, bridging a river only where no bridge is near
+// streets follow a square grid, one every GRID tiles, leaving 4×4 blocks between them; buildings never stand on a
+// grid line, so the parallel streets can always be laid later. when no lot is free the builder extends the grid,
+// bridging a river only where no bridge is near
 const CENTER = 31.5;
 const BRIDGE_GAP = 8;
 // businesses that earn come before decorations, each group cheapest first
@@ -56,7 +58,7 @@ function autoWonder(s: GameState, spare: () => number) {
   let best: { x: number; y: number } | null = null, bd = Infinity;
   const n = BUILDINGS[next].size;
   for (let y = VB.min; y <= VB.max - n + 1; y++) for (let x = VB.min; x <= VB.max - n + 1; x++) {
-    if (x + y < bd && placement(s, next, x, y)) { bd = x + y; best = { x, y }; }
+    if (x + y < bd && offGrid(x, y, n) && placement(s, next, x, y)) { bd = x + y; best = { x, y }; }
   }
   if (best) build(s, next, best.x, best.y);
 }
@@ -79,7 +81,6 @@ function gateRoads(s: GameState, spare: () => number): boolean {
 
 function autoBuild(s: GameState, spare: () => number) {
   if (gateRoads(s, spare)) return;
-  if (branchRoads(s, spare)) return;
   const homeless = residents(s).some((n) => (n.role === 'fighter' || n.role === 'gatherer') && n.home == null);
   const want = homeless && freeBeds(s) <= 0 ? ['house'] : once().filter((k) => !s.buildings.some((b) => b.type === k));
   const types = want.filter((k) => canBuild(s, k) && buildCost(s, k).money <= spare());
@@ -105,17 +106,24 @@ function autoBuild(s: GameState, spare: () => number) {
   if (c && c.money <= spare()) expand(s);
 }
 
-function bestSpot(s: GameState, type: string) {
+// a terrain building may stand on a grid line when no block beside its terrain is free
+function bestSpot(s: GameState, type: string, grid = true): { x: number; y: number } | null {
   let best: { x: number; y: number } | null = null, bd = Infinity;
   const n = BUILDINGS[type].size;
   for (let y = VB.min; y <= VB.max; y++) for (let x = VB.min; x <= VB.max; x++) {
     const d = Math.hypot(x + n / 2 - CENTER, y + n / 2 - CENTER);
-    if (d < bd && placement(s, type, x, y)) { bd = d; best = { x, y }; }
+    if (d < bd && (!grid || offGrid(x, y, n)) && placement(s, type, x, y)) { bd = d; best = { x, y }; }
   }
-  return best;
+  return best ?? (grid && BUILDINGS[type].near ? bestSpot(s, type, false) : null);
 }
 
-const onGrid = (v: number) => (((v - 32) % 4) + 4) % 4 === 0;
+const GRID = 5;
+const onGrid = (v: number) => (((v - 32) % GRID) + GRID) % GRID === 0;
+// a footprint that keeps clear of every grid street
+function offGrid(x: number, y: number, n: number) {
+  for (let i = 0; i < n; i++) if (onGrid(x + i) || onGrid(y + i)) return false;
+  return true;
+}
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
 
 function bridgeNear(x: number, y: number) {
@@ -123,7 +131,7 @@ function bridgeNear(x: number, y: number) {
   return false;
 }
 
-// one straight run of street, continuing a grid line out of the existing network
+// one block's side of street, continuing a grid line out of the existing network, nearest the centre first
 function extendRoads(s: GameState, spare: () => number): boolean {
   const cands: { x: number; y: number; dx: number; dy: number; d: number }[] = [];
   for (const i of s.roads) {
@@ -137,7 +145,7 @@ function extendRoads(s: GameState, spare: () => number): boolean {
   }
   cands.sort((a, b) => a.d - b.d);
   for (const c of cands) {
-    const r = layRun(s, spare, c, 8);
+    const r = layRun(s, spare, c, GRID);
     if (r != null) return r;
   }
   return false;
@@ -173,32 +181,4 @@ function layRun(s: GameState, spare: () => number, c: { x: number; y: number; dx
     if (bridged) log(s, 'log.autoBridge', {});
     return true;
   }
-}
-
-// no street runs on for long without a turning: a straight stretch of more than MAX_RUN tiles with nothing branching off
-// it gets a side street at a grid point near its middle, so the village grows as blocks rather than one long cross
-const MAX_RUN = 7;
-function branchRoads(s: GameState, spare: () => number): boolean {
-  const runs: { tiles: [number, number][]; horiz: boolean }[] = [];
-  for (const horiz of [true, false]) for (let a = VB.min; a <= VB.max; a++) {
-    let run: [number, number][] = [];
-    const flush = () => { if (run.length > MAX_RUN) runs.push({ tiles: run, horiz }); run = []; };
-    for (let b = VB.min; b <= VB.max + 1; b++) {
-      const x = horiz ? b : a, y = horiz ? a : b;
-      const side = horiz ? isRoad(x, y - 1) || isRoad(x, y + 1) : isRoad(x - 1, y) || isRoad(x + 1, y);
-      if (b <= VB.max && isRoad(x, y) && !isWater(x, y) && !side) run.push([x, y]);
-      else { if (b <= VB.max && isRoad(x, y) && side && run.length) run.push([x, y]); flush(); }
-    }
-  }
-  runs.sort((p, q) => q.tiles.length - p.tiles.length);
-  for (const { tiles, horiz } of runs) {
-    const mid = (tiles.length - 1) / 2;
-    const spots = tiles.map((t, k) => ({ t, k })).filter(({ t }) => onGrid(horiz ? t[0] : t[1])).sort((p, q) => Math.abs(p.k - mid) - Math.abs(q.k - mid));
-    for (const { t: [x, y] } of spots) for (const sgn of y + x < 64 ? [1, -1] : [-1, 1]) {
-      const dx = horiz ? 0 : sgn, dy = horiz ? sgn : 0;
-      const r = layRun(s, spare, { x: x + dx, y: y + dy, dx, dy }, 4);
-      if (r != null) return r;
-    }
-  }
-  return false;
 }
