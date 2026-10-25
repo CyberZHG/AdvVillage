@@ -150,9 +150,10 @@ const homeOrGuild = (s: GameState, n: Npc) => bld(s, n.home) ?? guild(s);
 
 const BIO_LEVELS = new Set([10, 25, 50, 100, 150, 200, 300, 500, 1000, 2000, 5000, 10000]);
 
-function gainNpcExp(s: GameState, n: Npc, amount: number) {
+// raw experience (special training) skips the boosts
+export function gainNpcExp(s: GameState, n: Npc, amount: number, raw = false) {
   const before = n.level;
-  const boost = n.role === 'fighter' ? (hasEffect(s, 'sage') ? 1.5 : 1) * (1 + rbonus(s, 'training')) * skillMult(n, 'instinct') * (hasPerk(s.buildings, 'academy') ? 1.1 : 1) * schoolMult(n, 'exp') * boon('exp') : 1;
+  const boost = raw ? 1 : n.role === 'fighter' ? (hasEffect(s, 'sage') ? 1.5 : 1) * (1 + rbonus(s, 'training')) * skillMult(n, 'instinct') * (hasPerk(s.buildings, 'academy') ? 1.1 : 1) * schoolMult(n, 'exp') * boon('exp') : 1;
   const ups = gainExp(n, amount * boost);
   if (!ups) return;
   checkPromotion(s, n);

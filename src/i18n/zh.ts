@@ -111,6 +111,7 @@ const dict: Record<string, string> = {
 
   'log.welcome': '你受托管理{village}。建设一个冒险者愿意安居的村子吧。',
   'log.built': '{b}建成了。', 'log.bldLevel': '{b}经营有方，提升至 Lv.{lv}。',
+  'ui.train': '特训', 'ui.trainHint': '用金币和怪物材料直接提升一级。每一级所需的材料都不同。', 'log.trained': '{n}完成特训，升到了 Lv.{lv}。',
   'log.bldUpgrade': '{b}升级至 Lv.{lv}。', 'log.forged': '{w}的锻造等级提升至 +{lv}。',
   'log.expRecruit': '协会开始招募前往{loc}的远征队。', 'log.expanded': '村庄完成扩建（第{lv}阶段）。',
   'log.npcLevel': '{n}达到了 Lv.{lv}。', 'log.monsterLevel': '{m}变得更强了（Lv.{lv}）。',

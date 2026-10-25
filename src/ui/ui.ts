@@ -24,6 +24,7 @@ import { buildingIcon, catIcon, humanIcon, itemIcon, monsterIcon, tileIcon, uiIc
 import { CLASS_COLOR, type Sel } from '../render/renderer';
 import { QUEUE_MAX, RESEARCH, canQueue, canResearch, researchCost, rlv } from '../game/research';
 import { AUTO_KEYS, autoReserve } from '../game/auto';
+import { canTrain, trainCost } from '../game/train';
 import { COMMON_PER, PROC, SKILL_MAX, chargeMult, mendPower, procChance, skillsOf, slv } from '../game/skills';
 import { CAT_MAX, CAT_PERKS, catNeed, petsLeft } from '../game/cat';
 import { PET_BONUS, petCap, petRole } from '../game/pets';
@@ -532,7 +533,7 @@ function infoCard(c: Ctl): string {
     body += '</div>';
     const db = debuffs(n);
     if (db.length) body += `<div>${db.map((d) => `<span class="tag bad">${t('debuff.' + d)}: ${t('debuffd.' + d)}</span>`).join('')}</div>`;
-    if (n.role === 'fighter') body += skillsHtml(n);
+    if (n.role === 'fighter') body += skillsHtml(n) + trainHtml(s, n);
     if (n.bio?.length) body += `<h3>${t('ui.story')}</h3><ul class="bio">${[...n.bio].reverse().map((e) => `<li><span class="log-date">${t('ui.dayShort', { y: Math.floor(e.t / DAYS_PER_YEAR) + 1, m: Math.floor((e.t % DAYS_PER_YEAR) / DAYS_PER_MONTH) + 1 })}</span> ${esc(t(e.k, e.p))}</li>`).join('')}</ul>`;
   }
   if (n.vip) body += `<p class="meta">${t('vipd.' + n.vip)}</p>`;
@@ -774,6 +775,16 @@ function researchBtn(s: GameState, k: string): string {
   if (s.researching.k === k) return '';
   if (s.rqueue.includes(k)) return btn('unqueue:' + k, t('ui.unqueue'));
   return btn('queue:' + k, t('ui.queueAdd'), { disabled: !canQueue(s, k) });
+}
+
+// special training: gold and a material that changes with every level buy one level
+function trainHtml(s: GameState, n: Npc): string {
+  const c = trainCost(s, n);
+  if (!c) return '';
+  const have = s.items[c.mat] ?? 0;
+  return `<h3>${t('ui.train')}</h3><div class="row"><span class="grow">${t('ui.upgradeTo', { lv: n.level + 1 })}
+    <br>${money(c.money, s.money >= c.money)} <span class="cost ${have >= c.count ? '' : 'bad'}">${img(itemIcon(c.mat))}${t('item.' + c.mat)} ${fmt(have)}/${fmt(c.count)}</span></span>
+    ${btn('train:' + n.id, t('ui.train'), { disabled: !canTrain(s, n) })}</div><p class="meta">${t('ui.trainHint')}</p>`;
 }
 
 function skillsHtml(n: Npc): string {

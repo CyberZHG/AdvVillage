@@ -17,6 +17,7 @@ import { advanceWonder, build, canBuild, clearTerrain, demolish, expand, forgeUp
 import { bld } from './game/state';
 import { offlineHtml, roadStyle, setChartKind, setForgeSlot, setRoadStyle } from './ui/ui';
 import { queueResearch, startResearch, unqueueResearch } from './game/research';
+import { train } from './game/train';
 import type { AutoKey } from './game/auto';
 import { petCat } from './game/cat';
 import { sendTrade, advanceMega } from './game/village';
@@ -188,6 +189,7 @@ function act(a: string) {
     }
     case 'forge': if (!forgeUpgrade(s!, x, 'village')) toast(t('ui.notEnough')); break;
     case 'forgeSlot': setForgeSlot(x); break;
+    case 'train': { const n = s!.npcs.find((o) => o.id === Number(x)); if (n && !train(s!, n)) toast(t('ui.notEnough')); break; }
     case 'research': if (!startResearch(s!, x)) toast(t('ui.notEnough')); break;
     case 'queue': queueResearch(s!, x); break;
     case 'unqueue': unqueueResearch(s!, x); break;

@@ -111,6 +111,7 @@ const dict: Record<string, string> = {
 
   'log.welcome': 'You have been entrusted with {village}. Build a place where adventurers will want to live.',
   'log.built': '{b} was built.', 'log.bldLevel': '{b} reached Lv.{lv} through steady business.',
+  'ui.train': 'Train', 'ui.trainHint': 'Spend gold and monster materials to raise one level at once. Every level asks for a different material.', 'log.trained': '{n} finished special training and reached Lv.{lv}.',
   'log.bldUpgrade': '{b} was upgraded to Lv.{lv}.', 'log.forged': '{w} forging improved to +{lv}.',
   'log.expRecruit': 'The guild is recruiting for an expedition to {loc}.', 'log.expanded': 'The village was expanded (stage {lv}).',
   'log.npcLevel': '{n} reached Lv.{lv}.', 'log.monsterLevel': '{m} have grown stronger (Lv.{lv}).',

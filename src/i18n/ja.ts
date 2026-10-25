@@ -137,6 +137,7 @@ const dict: Record<string, string> = {
 
   'log.welcome': '{village}を任されました。冒険者が住みたくなる村をつくりましょう。',
   'log.built': '{b}が完成しました。', 'log.bldLevel': '{b}は繁盛してLv.{lv}になりました。',
+  'ui.train': '特訓', 'ui.trainHint': 'ゴールドと魔物の素材でレベルを1つ上げます。必要な素材はレベルごとに変わります。', 'log.trained': '{n}が特訓を終え、Lv.{lv}になりました。',
   'log.bldUpgrade': '{b}をLv.{lv}に強化しました。', 'log.forged': '{w}の鍛冶レベルが+{lv}になりました。',
   'log.expRecruit': 'ギルドが{loc}への遠征隊を募集しています。', 'log.expanded': '村を拡張しました（第{lv}段階）。',
   'log.npcLevel': '{n}がLv.{lv}になりました。', 'log.monsterLevel': '{m}が強くなりました（Lv.{lv}）。',

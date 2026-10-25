@@ -137,6 +137,7 @@ const dict: Record<string, string> = {
 
   'log.welcome': '{village}을(를) 맡게 되었습니다. 모험가들이 살고 싶어 하는 마을을 만들어 보세요.',
   'log.built': '{b} 완공.', 'log.bldLevel': '{b}이(가) 장사가 잘되어 Lv.{lv}이 되었습니다.',
+  'ui.train': '특훈', 'ui.trainHint': '골드와 몬스터 재료로 레벨을 하나 올립니다. 필요한 재료는 레벨마다 달라집니다.', 'log.trained': '{n}이(가) 특훈을 마치고 Lv.{lv}가 되었습니다.',
   'log.bldUpgrade': '{b}을(를) Lv.{lv}로 강화했습니다.', 'log.forged': '{w}의 단련 레벨이 +{lv}이 되었습니다.',
   'log.expRecruit': '길드가 {loc} 원정대를 모집하고 있습니다.', 'log.expanded': '마을을 확장했습니다({lv}단계).',
   'log.npcLevel': '{n}이(가) Lv.{lv}이 되었습니다.', 'log.monsterLevel': '{m}이(가) 강해졌습니다(Lv.{lv}).',
