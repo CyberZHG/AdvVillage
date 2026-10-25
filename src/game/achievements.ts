@@ -63,7 +63,6 @@ export const ACHIEVEMENTS: [string, Check][] = [
   ['family', (s) => s.couples.some((c) => c.kids > 0)],
   ['titled', (s) => s.npcs.some((n) => (n.titles?.length ?? 0) >= 3)],
   ['combo1', (s) => s.comboSeen.length >= 1],
-  ['comboAll', (s) => COMBOS.every((c) => s.comboSeen.includes(c.key))],
   ['festival', (s) => festival(s) !== null],
   ['villMaple', (s) => (s.vstat?.boats ?? 0) >= 6],
   ['villIron', (s) => s.village === 'iron' && has(s, 'mineShaft') && has(s, 'quarry')],
