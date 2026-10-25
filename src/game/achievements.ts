@@ -1,7 +1,6 @@
 import { CLASS_KEYS, EQUIP, EXPEDITIONS, MONSTERS, VILLAGES } from './data';
 import { EXPANSIONS } from './constants';
 import { residents } from './state';
-import { COMBOS } from './combos';
 import { festival } from './events';
 import { fameRank } from './fame';
 import { BUILDINGS, ITEMS, bldAvailable, finished } from './data';

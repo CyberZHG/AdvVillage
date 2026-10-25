@@ -63,9 +63,11 @@ function autoWonder(s: GameState, spare: () => number) {
   if (best) build(s, next, best.x, best.y);
 }
 
-// a village's own kind of house (the marsh's stilt houses) counts as a kind to build once too
+// a village's own kind of house (the marsh's stilt houses) counts as a kind to build once too. buildings that must
+// stand beside some terrain go first, before ordinary ones take the few lots there (the mine shaft by its cave)
+const group = (k: string) => (BUILDINGS[k].near ? 0 : BUILDINGS[k].kind === 'decor' ? 2 : 1);
 const once = () => Object.keys(BUILDINGS).filter((k) => BUILDINGS[k].buildable !== false && k !== 'guild' && (BUILDINGS[k].kind !== 'house' || !!BUILDINGS[k].village) && !BUILDINGS[k].wonder)
-  .sort((a, b) => +(BUILDINGS[a].kind === 'decor') - +(BUILDINGS[b].kind === 'decor') || BUILDINGS[a].cost.money - BUILDINGS[b].cost.money);
+  .sort((a, b) => group(a) - group(b) || BUILDINGS[a].cost.money - BUILDINGS[b].cost.money);
 
 // first of all, a street runs straight through the village from each gate to the one facing it
 function gateRoads(s: GameState, spare: () => number): boolean {

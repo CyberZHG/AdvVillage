@@ -95,6 +95,27 @@ function restore(s: GameState): GameState {
     for (const k of ['water', 'rock', 'bog', 'thicket'] as const) s.terrain[k] = s.terrain[k].filter((i) => !gone.has(i) || (k === 'water' && !added.includes(i) && !s.terrain!.spring!.includes(i)));
     s.nodes = s.nodes.filter((n) => !gone.has(n.y * MAP + n.x));
   }
+  {
+    // caves added to a village's definition later (the iron village's one inside its walls, without which the mine
+    // shaft could never be built) are dug where defined, or on the nearest open tile if something stands there
+    const busy = new Set([...(s.roads ?? []), ...s.buildings.flatMap((b) => { const n = BUILDINGS[b.type].size, o: number[] = []; for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) o.push((b.y + j) * MAP + b.x + i); return o; })]);
+    const t = s.terrain as unknown as Record<string, number[] | undefined>;
+    const used = new Set(Object.values(t).flatMap((l) => l ?? []));
+    const open = (i: number) => !busy.has(i) && !used.has(i) && i % MAP !== 32 && ((i / MAP) | 0) !== 32;
+    s.terrain.cave ??= [];
+    for (const c of makeTerrain(s.village).cave ?? []) {
+      if (s.terrain.cave.includes(c)) continue;
+      const cx = c % MAP, cy = (c / MAP) | 0;
+      let at = -1;
+      for (let r = 0; r < 8 && at < 0; r++) for (let dy = -r; dy <= r && at < 0; dy++) for (let dx = -r; dx <= r && at < 0; dx++) {
+        const i = (cy + dy) * MAP + cx + dx;
+        if (Math.max(Math.abs(dx), Math.abs(dy)) === r && open(i)) at = i;
+      }
+      if (at < 0) continue;
+      s.terrain.cave.push(at); used.add(at);
+      s.nodes = s.nodes.filter((n) => n.y * MAP + n.x !== at);
+    }
+  }
   // the gorge follows its definition, whatever an older save recorded
   const wantCanyon = makeTerrain(s.village).canyon ?? [];
   if (s.terrain.canyon?.length || wantCanyon.length) { s.terrain.canyon = wantCanyon; const gone = new Set(s.terrain.canyon); s.nodes = s.nodes.filter((n) => !gone.has(n.y * MAP + n.x)); }
