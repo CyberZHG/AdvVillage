@@ -36,15 +36,20 @@ export function championsDaily(s: GameState) {
   const fin = s.monsters.find((m) => m.champ === 'final');
   if (legacy.finalDown && fin) s.monsters = s.monsters.filter((m) => m !== fin);
   if (!fin && !legacy.finalDown && Object.keys(CHAMPION).every((v) => legacy.champs.includes(v))) {
-    const m = place(s, FINAL, 'final', FINAL_MUL, Math.max(90, Math.round(topLevel(s) * 1.25)));
+    // its level is set by the village where it first appears and is the same everywhere after
+    const m = place(s, FINAL, 'final', FINAL_MUL, legacy.finalLv >= 0 ? legacy.finalLv : Math.max(90, Math.round(topLevel(s) * 1.25)));
+    legacy.finalLv = m.lv!;
     if (legacy.finalHp >= 0) m.hp = Math.min(m.hp, legacy.finalHp);
     log(s, 'ev.final');
   }
 }
-// the final boss's health is one pool across the villages: whatever is lost here is lost everywhere
+// the final boss's health is one pool across the villages: whatever is lost here is lost everywhere. it is one
+// creature at one level too; a boss that rose in an older save at another level takes on the shared one
 export function syncFinal(s: GameState) {
   const fin = s.monsters.find((m) => m.champ === 'final');
   if (!fin) return;
+  if (legacy.finalLv < 0) legacy.finalLv = fin.lv!;
+  else fin.lv = legacy.finalLv;
   if (legacy.finalHp >= 0 && legacy.finalHp < fin.hp) fin.hp = legacy.finalHp;
   else legacy.finalHp = fin.hp;
 }

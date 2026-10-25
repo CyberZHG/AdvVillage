@@ -102,7 +102,7 @@ function startGame(village: string, fresh: boolean) {
 function achievements() {
   if (!s) return;
   // the champions' fall and the final boss's shared health live in the meta save, shared by every village
-  meta.legacy = { champs: [...legacy.champs], finalHp: legacy.finalHp, finalDown: legacy.finalDown };
+  meta.legacy = { champs: [...legacy.champs], finalHp: legacy.finalHp, finalDown: legacy.finalDown, finalLv: legacy.finalLv };
   const fresh = checkAchievements(s, meta);
   if (!fresh.length) { saveMeta(meta); return; }
   for (const id of fresh) log(s, 'log.achievement', { a: `@ach.${id}.name` });

@@ -10,7 +10,7 @@ import { PROMOTE_LEVEL } from './constants';
 const KEY = 'advvillage.save.';
 const META = 'advvillage.meta';
 
-export interface Meta { unlocked: number; best: Record<string, number>; lang?: string; ach: Record<string, number>; crowd?: string; legacy?: { champs: string[]; finalHp: number; finalDown: boolean } }
+export interface Meta { unlocked: number; best: Record<string, number>; lang?: string; ach: Record<string, number>; crowd?: string; legacy?: { champs: string[]; finalHp: number; finalDown: boolean; finalLv?: number } }
 
 function storage(): Storage | null {
   try { return typeof localStorage === 'undefined' ? null : localStorage; } catch { return null; }

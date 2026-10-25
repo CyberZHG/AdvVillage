@@ -1,8 +1,8 @@
-// progress shared by every village: which champions have fallen, the final boss's shared health, and the lasting
+// progress shared by every village: which champions have fallen, the final boss's shared health and level, and the lasting
 // boons they leave. Kept in the meta save; the game keeps a live copy here.
-export interface Legacy { champs: string[]; finalHp: number; finalDown: boolean }
-export const legacy: Legacy = { champs: [], finalHp: -1, finalDown: false };
-export const setLegacy = (l?: Partial<Legacy>) => { legacy.champs = [...(l?.champs ?? [])]; legacy.finalHp = l?.finalHp ?? -1; legacy.finalDown = !!l?.finalDown; };
+export interface Legacy { champs: string[]; finalHp: number; finalDown: boolean; finalLv: number }
+export const legacy: Legacy = { champs: [], finalHp: -1, finalDown: false, finalLv: -1 };
+export const setLegacy = (l?: Partial<Legacy>) => { legacy.champs = [...(l?.champs ?? [])]; legacy.finalHp = l?.finalHp ?? -1; legacy.finalDown = !!l?.finalDown; legacy.finalLv = l?.finalLv ?? -1; };
 
 // each village's champion
 export const CHAMPION: Record<string, string> = { maple: 'crimsonStag', iron: 'magmaColossus', mist: 'serpentQueen', frost: 'frostWyrm', sun: 'duneDjinn' };
